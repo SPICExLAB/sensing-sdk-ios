@@ -30,6 +30,8 @@ let package = Package(
         .target(name: "SensingWatch", dependencies: ["SensingCore", "SensingStorage", "SensingAdapters", "SensingLink"]),
         // macOS tool: chunks to CSV, plus a rate and gap report.
         .executableTarget(name: "sensing-decode", dependencies: ["SensingCore", "SensingStorage", "SensingProto"]),
+        // macOS tool: writes a fixture of every payload type and prints chunks canonically, for scripts/compat.sh.
+        .executableTarget(name: "sensing-compat", dependencies: ["SensingStorage", "SensingProto"]),
         .testTarget(name: "SensingCoreTests", dependencies: ["SensingCore", "SensingProto"]),
         .testTarget(name: "SensingStorageTests", dependencies: ["SensingStorage", "SensingProto"]),
     ]

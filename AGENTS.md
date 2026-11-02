@@ -7,6 +7,7 @@ Read [`README.md`](README.md), then [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS
 - Branch `<area>/<slug>` from `origin/main`, then a PR, then a squash merge after `scripts/check.sh` passes. GitHub Actions don't run for this account, so the script is the gate; say so in the PR with `check: all jobs pass @<sha>`.
 - Update `docs/plan/PROGRESS.md` in the same PR, with evidence. A decision gets a new S-NNN row at the bottom of `DECISIONS.md`; past rows are never edited.
 - Anything that changes what iOS data means compared with Android goes in `docs/ANDROID-DIFFERENCES.md`.
+- Anything touching `Sources/SensingStorage` or `proto/` also needs `scripts/compat.sh` to pass. `--regen-fixtures` rewrites `Tests/Fixtures` from Android's and Go's real writers; only do that when their format changed.
 
 ## Rules that must not break
 
@@ -32,4 +33,5 @@ Read [`README.md`](README.md), then [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS
 | `Sources/SensingLink` | WatchConnectivity behind a protocol |
 | `Sources/SensingKit`, `Sources/SensingWatch` | The public APIs for phone and watch |
 | `Sources/sensing-decode` | macOS tool: chunks to CSV, plus a rate and gap report |
+| `Sources/sensing-compat`, `tools/android-compat`, `tools/go-compat` | What `scripts/compat.sh` runs. The canonical line they share is defined in `Canonical.swift` |
 | `Example/` | The example app (`xcodegen generate` in that folder; the `.xcodeproj` is ignored) |

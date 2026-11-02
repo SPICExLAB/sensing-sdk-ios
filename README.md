@@ -22,4 +22,14 @@ swift test                 # the platform-neutral code, on macOS
 scripts/check.sh           # everything a PR must pass: lints, tests, iOS and watchOS builds
 scripts/check.sh --quick   # lints and tests only
 scripts/gen-proto.sh       # regenerate Sources/SensingProto from proto/
+scripts/compat.sh          # proves the format against Android's and the ingest's real decoders
+                           # (needs ../sensing-sdk, ../inrtl-lab and Go; run it whenever storage changes)
 ```
+
+## Checking a recording on a Mac
+
+```sh
+swift run sensing-decode <export.zip or folder> --check --out DIR
+```
+
+It prints each stream's rate and gaps, writes CSVs, and verifies each chunk. An export is participants' data: keep it out of this repo.

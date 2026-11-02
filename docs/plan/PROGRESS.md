@@ -8,7 +8,7 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 |---|---|---|---|
 | P0 | ☑ | Repo, package, proto, zlib compile, lints, plan docs | Builds and tests, including the watch target |
 | P1 | ☑ | Diagnostics screen, bare locked recording on phone and watch | A0, rough A1 and A2. **Stop and report**: this decides the adapter design |
-| P2 | ☐ | Storage and `sensing-decode` | Android test vectors; `compat.sh` both ways |
+| P2 | ☑ | Storage and `sensing-decode` | Android test vectors; `compat.sh` both ways |
 | P3 | ☐ | Engine, config, activity sessions, outbox | Fake-adapter soak; killing a writer process and recovering |
 | P4 | ☐ | Phone motion adapters, keep-alive, minimal app | A1, A3, A4, A11 (phone) |
 | P5 | ☐ | Watch app, workout, link, transfer, clock pairing, recovery | A2, A8, A9, A10 |
@@ -43,3 +43,15 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 
 - ☑ A0: Q1, Q2, Q3, Q4 and Q6 closed (S-014 to S-017). Barometer as delivered: 0.94 Hz on the phone, 0.39 Hz on the watch. A 16 MB file transfer from watch to phone completed, but see Q10
 - ☐ Not run, because it wasn't needed: the workout-on-iPhone fallback, 3 km accuracy
+
+## P2
+
+- ☑ `SensingStorage`: frames, chunk writer, recovery with a startup sweep, retention with a persisted eviction outbox, the store, JSON records beside each chunk
+- ☑ Android's test vectors ported case for case (`FrameCodecTest`, `ChunkWriterRecoveryTest`, `RetentionTest`), plus tests for each deliberate difference
+- ☑ `sensing-decode`: chunks to CSV, a rate and gap report from `ts_mono_ns`, and `--check` against each chunk's record. It reports where Android's reader and the ingest's would disagree on a damaged file
+- ☑ `scripts/compat.sh`, 2026-11-02, comparing decoded content sample by sample. Nothing committed in the other repos changes:
+  - Swift's 8 chunks and 212 samples, covering all 6 payload types, read identically through Android's real `FrameCodec.kt` and Wire
+  - and through the ingest's real `frames.Decode` (0 skipped), `rowsFor` and `projectLabels`: 4 label events became 2 session writes and 2 label writes, with nothing skipped
+  - Swift reads the Android-written and Go-written fixtures now committed in `Tests/Fixtures`, the golden fixtures this format never had, and agrees with Android's scanner on where damaged files stop being valid
+- ☑ The check can fail: a little-endian CRC and raw deflate in place of gzip were each caught by both JVM and Go
+- ☐ Not yet on a device: it's run on macOS, and it compiles for iOS and watchOS. The first real chunks come with P4

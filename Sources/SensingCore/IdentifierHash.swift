@@ -20,3 +20,10 @@ public struct IdentifierHash: Sendable {
     let digits = Array("0123456789abcdef")
     return String([digits[numericCast(b >> 4)], digits[numericCast(b & 0x0f)]])
 }
+
+public enum Hex {
+    /// Bytes as lower-case hex, with no locale involved.
+    public static func lower<S: Sequence>(_ bytes: S) -> String where S.Element == UInt8 {
+        bytes.map { hex2($0) }.joined()
+    }
+}

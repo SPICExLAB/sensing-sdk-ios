@@ -32,4 +32,6 @@ These look like bugs or weak spots in the Android SDK. They're noted here for a 
 | Eviction events can be lost when the engine is stopped (`Retention.kt:50`) | A persisted outbox | "Never silent" |
 | `"%.1f".format` uses the default locale (`BatteryAdapter.kt:65`) | POSIX formatting | Comma-decimal locales change attribute values |
 | One `device.gap` per dropped sample | One per run of drops | A burst would add more load at the worst moment |
+| A Room database of chunk rows; `ACKED` and `EVICTED` rows are never pruned | A JSON record beside each chunk, with state from the file system | No rows to go stale |
+| Quota always deletes the oldest | Stops the recording at the quota by default; deleting is an option (S-007) | The device may hold the only copy |
 | `peer_clock` is one-way (`PhoneRelayReceiver.kt:81-87`) | The round-trip midpoint, with `rtt_ns` | Removes the transit bias; required fields are unchanged |
