@@ -1,6 +1,6 @@
 # sensing-sdk-ios
 
-A Swift SDK that records iPhone and Apple Watch sensors to disk, plus an example data-collection app. It's the counterpart of the Android [`sensing-sdk-android`](https://github.com/rahul-islam/sensing-sdk-android) and writes the same `sensorlog.v1` chunk format, so the data can sit alongside Android's without conversion. It isn't connected to inrtl Lab yet: data stays on the device and is exported by hand.
+A Swift SDK that records iPhone and Apple Watch sensors to disk, plus an example data-collection app. It's the counterpart of the Android [`sensing-sdk-android`](https://github.com/SPICExLAB/sensing-sdk-android) and writes the same `sensorlog.v1` chunk format, so the data can sit alongside Android's without conversion. It isn't connected to inrtl Lab yet: data stays on the device and is exported by hand.
 
 **Status: in progress.** See [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS.md).
 
