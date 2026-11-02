@@ -22,14 +22,14 @@ proto_matches_android() {
 # The engine is an actor with no suspension points, so it can't hit the re-entrancy bug class Android's engine hit
 # (sensing-sdk AGENTS.md: a loop over batchers across a suspension point crashed).
 no_await_in_engine() {
-  [ -d Sources/SensingCore/Engine ] || return 0
-  ! grep -rnE '\bawait\b' Sources/SensingCore/Engine --include='*.swift' | grep -v '// await-ok'
+  [ -d Sources/SensingEngine/Engine ] || return 0
+  ! grep -rnE '\bawait\b' Sources/SensingEngine/Engine --include='*.swift' | grep -v '// await-ok'
 }
 
 # Int is 32 bits on the watch's arm64_32, and macOS tests can't catch an overflow: nanoseconds, seq and byte totals are
 # Int64. A conversion that's really safe says why with `// int-ok: <reason>`.
 no_int_conversions() {
-  ! grep -rnE '(^|[^A-Za-z0-9_.])Int\(' Sources/SensingCore Sources/SensingStorage --include='*.swift' | grep -v '// int-ok'
+  ! grep -rnE '(^|[^A-Za-z0-9_.])Int\(' Sources/SensingCore Sources/SensingStorage Sources/SensingEngine --include='*.swift' | grep -v '// int-ok'
 }
 
 # Swift's uuidString is upper case; Android's ids are lower case, and the ingest stores them verbatim.
@@ -39,10 +39,10 @@ uuids_are_lowercase() {
 
 # Attribute numbers use POSIX formatting: Android's default-locale format changes values in comma-decimal locales.
 no_locale_number_format() {
-  ! grep -rnE 'String\(format:' Sources/SensingCore Sources/SensingStorage Sources/SensingAdapters --include='*.swift' | grep -v 'locale:'
+  ! grep -rnE 'String\(format:' Sources/SensingCore Sources/SensingStorage Sources/SensingEngine Sources/SensingAdapters --include='*.swift' | grep -v 'locale:'
 }
 
-# Build output has been committed by accident once (P2), which a glance at the diff stat should have caught.
+# This repo will go public. Build output can hold copies of private code, and once pushed it's in the history.
 no_build_output_tracked() {
   ! git ls-files | grep -E '(^|/)(\.build|\.gradle|\.kotlin|build|DerivedData)/'
 }

@@ -23,3 +23,58 @@ public enum Clock {
         return m - (a + (b - a) / 2)
     }
 }
+
+/// The clocks the engine reads, so tests can run minutes of recording in milliseconds.
+public protocol EngineClock: Sendable {
+    func monoNs() -> Int64
+    func uptimeNs() -> Int64
+    func wallMs() -> Int64
+}
+
+public struct SystemClock: EngineClock {
+    public init() {}
+    public func monoNs() -> Int64 { Clock.monoNs() }
+    public func uptimeNs() -> Int64 { Clock.uptimeNs() }
+    public func wallMs() -> Int64 { Clock.wallMs() }
+}
+
+/// Converts CoreMotion's uptime timestamps to `ts_mono_ns`. A sample has to get the offset that held when it was taken:
+/// one taken before a sleep but delivered after it would otherwise be stamped late by the whole sleep. Thread-safe.
+public final class SleepOffsetTracker: @unchecked Sendable {
+    private struct Change {
+        var uptimeNs: Int64
+        var offsetNs: Int64
+    }
+
+    /// Reading noise between the two clocks is microseconds; real sleep is far longer.
+    private static let significantNs: Int64 = 1_000_000
+    private static let keep = 64
+    private let lock = NSLock()
+    private var changes: [Change]
+
+    public init(uptimeNs: Int64 = Clock.uptimeNs(), offsetNs: Int64 = Clock.sleepOffsetNs()) {
+        changes = [Change(uptimeNs: uptimeNs, offsetNs: offsetNs)]
+    }
+
+    /// Call with the clocks as they read now, at least on each delivery.
+    public func observe(uptimeNs: Int64, offsetNs: Int64) {
+        lock.withLock {
+            guard let last = changes.last, abs(offsetNs - last.offsetNs) > Self.significantNs else { return }
+            changes.append(Change(uptimeNs: uptimeNs, offsetNs: offsetNs))
+            if changes.count > Self.keep { changes.removeFirst() }
+        }
+    }
+
+    /// `ts_mono_ns` for a sample stamped at this uptime.
+    public func monoNs(forUptimeNs uptime: Int64) -> Int64 {
+        lock.withLock {
+            let change = changes.last { $0.uptimeNs <= uptime } ?? changes[0]
+            return uptime + change.offsetNs
+        }
+    }
+
+    /// The same for `CMLogItem.timestamp`, which is in seconds.
+    public func monoNs(forTimestamp seconds: Double) -> Int64 {
+        monoNs(forUptimeNs: Int64((seconds * 1e9).rounded()))
+    }
+}

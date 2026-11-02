@@ -42,6 +42,9 @@ public struct StorageRoot: Sendable {
         #endif
     }
 
+    /// For other modules' files under this root.
+    public static func protectFile(_ url: URL) { protect(url) }
+
     static func excludeFromBackup(_ url: URL) {
         var u = url
         var values = URLResourceValues()

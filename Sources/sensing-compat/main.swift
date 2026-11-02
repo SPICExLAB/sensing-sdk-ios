@@ -1,4 +1,6 @@
 import Foundation
+import SensingCore
+import SensingEngine
 import SensingProto
 import SensingStorage
 
@@ -7,6 +9,7 @@ import SensingStorage
 //   sensing-compat write DIR    writes a fixture of every payload type through the real ChunkStore,
 //                               plus DIR/expected.txt: its canonical lines, sorted
 //   sensing-compat read PATH    prints the canonical lines of every chunk under PATH, sorted
+//   sensing-compat writer DIR   records 8 streams at 100 Hz through the real engine until killed. The kill test uses this
 
 let device = "aaaaaaaa-0000-4000-8000-000000000001"
 let session = "bbbbbbbb-0000-4000-8000-000000000002"
@@ -90,18 +93,60 @@ func fixtureBatches() -> [Sensorlog_V1_SampleBatch] {
         ]),
         batch("device.session", [event("device.session", seq: 0, "start", ["reason": "engine_start", "platform": "ios", "note": "é=;,|% ok"])]),
         batch("device.clock", [event("device.clock", seq: 0, "clock", ["mono_ns": mono, "wall_ms": wall])]),
-        // A whole activity session, so the ingest's label projection is exercised.
-        batch("label.session", [
-            event("label.session", seq: 0, "session_start", ["session_id": activity, "config_id": "free/walking", "config_version": "1", "module": "free",
-                                                             "taxonomy_version": "2", "start_wall_ms": wall, "start_mono_ns": mono]),
-            event("label.session", seq: 1, "label_upsert", ["session_id": activity, "label_id": label, "kind": "interval", "taxonomy_id": "locomotion/walking",
-                                                            "taxonomy_version": "2", "source": "tap", "confidence": "1", "start_wall_ms": wall, "start_mono_ns": mono]),
-            event("label.session", seq: 2, "label_upsert", ["session_id": activity, "label_id": label, "kind": "interval", "taxonomy_id": "locomotion/walking",
-                                                            "taxonomy_version": "2", "source": "tap", "confidence": "1", "start_wall_ms": wall, "start_mono_ns": mono,
-                                                            "end_wall_ms": "1793000060000", "end_mono_ns": "200060000000000", "attr.where": "outdoors"]),
-            event("label.session", seq: 3, "session_end", ["session_id": activity, "end_reason": "stopped", "end_wall_ms": "1793000060000", "end_mono_ns": "200060000000000"]),
-        ]),
+        // Whole activity sessions from the real SessionEvents, so the ingest's label projection judges what the app writes.
+        batch("label.session", labelEvents().enumerated().map { i, e in event("label.session", seq: UInt64(i), e.kind, e.attrs) }),
     ]
+}
+
+func labelEvents() -> [SessionEvent] {
+    func spec(_ id: String, _ labelId: String) -> SessionSpec {
+        SessionSpec(sessionId: id, label: "Walking", maxDurationMs: 3_600_000,
+                    startAttrs: ["config_id": "free/walking", "config_version": "1", "module": "free", "taxonomy_version": "2"],
+                    labelAttrs: ["label_id": labelId, "kind": "interval", "taxonomy_id": "locomotion/walking", "taxonomy_version": "2", "source": "tap", "confidence": "1"])
+    }
+    let kept = ActiveSession(spec: spec(activity, label), startWallMs: 1_793_000_000_000, startMonoNs: 200_000_000_000_000)
+    let stopped = EndedSession(session: kept, endWallMs: 1_793_000_060_000, endMonoNs: 200_060_000_000_000, reason: ActivitySessions.stopped, answered: true)
+    let mistaken = ActiveSession(spec: spec("eeeeeeee-0000-4000-8000-000000000005", "ffffffff-0000-4000-8000-000000000006"), startWallMs: 1_793_000_100_000, startMonoNs: 200_100_000_000_000)
+    let discarded = EndedSession(session: mistaken, endWallMs: 1_793_000_101_000, endMonoNs: nil, reason: ActivitySessions.discarded, answered: true)
+    return SessionEvents.start(kept) + SessionEvents.end(stopped, answers: ["where": "outdoors"]) + SessionEvents.start(mistaken) + SessionEvents.end(discarded, answers: [:])
+}
+
+/// Pushes 8 streams at 100 Hz from its own thread, as CoreMotion would.
+final class FullRateAdapter: SensorAdapter, @unchecked Sendable {
+    let sensors = (0..<8).map { SensorID(known: "motion.stream\($0)") }
+    private let lock = NSLock()
+    private var sinks: [SampleSink] = []
+    func availability(of sensor: SensorID) -> Availability { .available }
+
+    func start(_ settings: [SensorID: SensorSetting], sinks: [SensorID: SampleSink], clock: any EngineClock) {
+        lock.withLock { self.sinks = sensors.compactMap { sinks[$0] } }
+        Thread.detachNewThread { [self] in
+            while true {
+                let current = lock.withLock { self.sinks }
+                let mono = clock.monoNs(), wall = clock.wallMs()
+                for sink in current { sink.vec3(0.5, -9.8, 0.25, tsMonoNs: mono, tsWallMs: wall, accuracy: .high) }
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
+    }
+
+    func stop() { lock.withLock { sinks = [] } }
+}
+
+func runWriter(_ path: URL) async throws {
+    let root = try StorageRoot(parent: path)
+    let adapter = FullRateAdapter()
+    var options = CollectionEngine.Options()
+    options.freeBytes = { 1 << 40 }
+    let engine = CollectionEngine(root: root, deviceId: device, options: options)
+    let sessions = ActivitySessions(root: root)
+    let config = CollectionConfig(sensors: Dictionary(uniqueKeysWithValues: adapter.sensors.map { ($0, SensorSetting.hz(100)) }))
+    await engine.start(config, adapters: [adapter])
+    try sessions.start(SessionSpec(sessionId: activity, label: "Walking", maxDurationMs: 3_600_000, startAttrs: ["module": "free"], labelAttrs: ["label_id": label, "kind": "interval"]))
+    await sessions.flush { await engine.emit(SensorIDs.label, $0, $1) }
+    print("recording")
+    fflush(stdout)
+    while true { try await Task.sleep(for: .seconds(60)) }
 }
 
 func chunkFiles(under path: URL) -> [URL] {
@@ -115,7 +160,7 @@ func canonicalLines(under path: URL) throws -> [String] {
 
 let arguments = CommandLine.arguments
 guard arguments.count == 3 else {
-    print("usage: sensing-compat write DIR | read PATH")
+    print("usage: sensing-compat write DIR | read PATH | writer DIR")
     exit(2)
 }
 let path = URL(fileURLWithPath: arguments[2])
@@ -132,7 +177,9 @@ case "write":
     print("wrote \(store.sealedChunks.count) chunks, \(lines.count) samples")
 case "read":
     for line in try canonicalLines(under: path) { print(line) }
+case "writer":
+    try await runWriter(path)
 default:
-    print("usage: sensing-compat write DIR | read PATH")
+    print("usage: sensing-compat write DIR | read PATH | writer DIR")
     exit(2)
 }

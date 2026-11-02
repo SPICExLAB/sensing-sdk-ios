@@ -9,7 +9,7 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 | P0 | ☑ | Repo, package, proto, zlib compile, lints, plan docs | Builds and tests, including the watch target |
 | P1 | ☑ | Diagnostics screen, bare locked recording on phone and watch | A0, rough A1 and A2. **Stop and report**: this decides the adapter design |
 | P2 | ☑ | Storage and `sensing-decode` | Android test vectors; `compat.sh` both ways |
-| P3 | ☐ | Engine, config, activity sessions, outbox | Fake-adapter soak; killing a writer process and recovering |
+| P3 | ☑ | Engine, config, activity sessions, outbox | Fake-adapter soak; killing a writer process and recovering |
 | P4 | ☐ | Phone motion adapters, keep-alive, minimal app | A1, A3, A4, A11 (phone) |
 | P5 | ☐ | Watch app, workout, link, transfer, clock pairing, recovery | A2, A8, A9, A10 |
 | P6 | ☐ | Location, activity, device state, sound, Bluetooth | A11 (rest), A12, A13 |
@@ -55,3 +55,15 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
   - Swift reads the Android-written and Go-written fixtures now committed in `Tests/Fixtures`, the golden fixtures this format never had, and agrees with Android's scanner on where damaged files stop being valid
 - ☑ The check can fail: a little-endian CRC and raw deflate in place of gzip were each caught by both JVM and Go
 - ☐ Not yet on a device: it's run on macOS, and it compiles for iOS and watchOS. The first real chunks come with P4
+
+## P3
+
+- ☑ `Intake` (`SensingCore`): callbacks push under a short lock, with `seq` assigned there. No I/O, task hop or string work per sample. A motion payload is stored inline
+- ☑ `CollectionEngine` (`SensingEngine`): an actor on its own serial queue with no suspension point inside, on a 500 ms tick. `Batcher` builds batches from each sample's bytes
+- ☑ `ActivitySessions` with its persisted outbox, and `CollectionConfig`, `SleepOffsetTracker` and `DeviceIdentity`
+- ☑ Android's `ActivitySessionsTest` and `CollectionConfigTest` ported case for case, plus engine tests with a fake clock and fake adapters
+- ☑ Soak: 8 streams at 100 Hz for 5 simulated minutes, 240,000 samples with nothing lost and seq contiguous, processed in 1.15 s on this Mac in a debug build, 2026-11-02. The real watch number comes from A3
+- ☑ Thread sanitizer: no data races across the engine and intake tests
+- ☑ A real process at full rate with the real timer, killed with SIGKILL and recovered: every stream contiguous from 0, under 3 s lost. A batch reaches the file every 2 to 2.5 s, which sets that bound
+- ☑ `scripts/compat.sh` now judges real `SessionEvents`: 8 label events, including a discarded session, became 4 session writes and 4 label writes in the ingest's `projectLabels`, with nothing skipped
+- Tests found 3 real bugs, all fixed: events raised during Stop's final drain were lost; a sample took 145 bytes because a rare large payload was stored inline; delete-oldest could evict label chunks and the eviction records themselves, which Android's can too

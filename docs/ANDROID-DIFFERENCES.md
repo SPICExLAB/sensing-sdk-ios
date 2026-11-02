@@ -33,5 +33,6 @@ These look like bugs or weak spots in the Android SDK. They're noted here for a 
 | `"%.1f".format` uses the default locale (`BatteryAdapter.kt:65`) | POSIX formatting | Comma-decimal locales change attribute values |
 | One `device.gap` per dropped sample | One per run of drops | A burst would add more load at the worst moment |
 | A Room database of chunk rows; `ACKED` and `EVICTED` rows are never pruned | A JSON record beside each chunk, with state from the file system | No rows to go stale |
+| Deleting the oldest can take label chunks and the eviction records themselves | Bookkeeping and label streams are never evicted | They're tiny, and losing a recording's labels costs far more than they free |
 | Quota always deletes the oldest | Stops the recording at the quota by default; deleting is an option (S-007) | The device may hold the only copy |
 | `peer_clock` is one-way (`PhoneRelayReceiver.kt:81-87`) | The round-trip midpoint, with `rtt_ns` | Removes the transit bias; required fields are unchanged |

@@ -7,6 +7,13 @@ public final class ChunkStore {
         public var bytesOnDisk: Int64
         public var quotaBytes: Int64
         public var freeBytes: Int64
+
+        public init(bytesOnDisk: Int64, quotaBytes: Int64, freeBytes: Int64) {
+            self.bytesOnDisk = bytesOnDisk
+            self.quotaBytes = quotaBytes
+            self.freeBytes = freeBytes
+        }
+
         public var isOverQuota: Bool { bytesOnDisk >= quotaBytes }
         /// How full the quota is, from 0 to 1 or more.
         public var fraction: Double { quotaBytes > 0 ? Double(bytesOnDisk) / Double(quotaBytes) : 1 }
@@ -17,6 +24,9 @@ public final class ChunkStore {
     public var mode: RetentionMode
     /// Chunks that mustn't be evicted right now: an upload or a transfer has them.
     public var isBusy: (ChunkRecord) -> Bool = { _ in false }
+    /// Streams never deleted for space: tiny ones whose loss would cost far more than they free, such as labels and the
+    /// record of what was lost.
+    public var neverEvict: Set<String> = []
     /// Every chunk as it seals.
     public var onSealed: (ChunkRecord) -> Void = { _ in }
 
@@ -103,7 +113,7 @@ public final class ChunkStore {
     public func enforceRetention(reason: String) throws -> [EvictedChunk] {
         guard mode == .evictOldest else { return [] }
         let s = status
-        let candidates = sealedChunks.filter { !isBusy($0) }
+        let candidates = sealedChunks.filter { !isBusy($0) && !neverEvict.contains($0.sensorId) }
         let victims = policy.select(onDiskBytes: s.bytesOnDisk, freeBytes: s.freeBytes, candidates: candidates)
         guard !victims.isEmpty else { return [] }
         let evicted = victims.map {

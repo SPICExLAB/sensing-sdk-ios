@@ -78,3 +78,16 @@ final class ChunkStoreTests: XCTestCase {
         XCTAssertEqual(s.sealedChunks.map(\.sensorId), ["motion.accelerometer", "motion.gyroscope"])
     }
 }
+
+final class DeviceIdentityTests: XCTestCase {
+    func testALowerCaseIdThatLastsUntilReinstall() throws {
+        let dir = try tempDir(self)
+        let root = try StorageRoot(parent: dir)
+        let id = try DeviceIdentity.load(root: root)
+        XCTAssertEqual(id, id.lowercased())
+        XCTAssertEqual(id.count, 36)
+        XCTAssertEqual(try DeviceIdentity.load(root: try StorageRoot(parent: dir)), id)
+        let other = try StorageRoot(parent: try tempDir(self))
+        XCTAssertNotEqual(try DeviceIdentity.load(root: other), id)
+    }
+}
