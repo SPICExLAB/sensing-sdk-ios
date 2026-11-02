@@ -119,12 +119,12 @@ public enum SensingCatalog {
     public static let phone = [
         motion(accelerometer, "Accelerometer", 50), motion(gyroscope, "Gyroscope", 50), motion(linearAcceleration, "Linear acceleration", 50),
         motion(magnetometer, "Magnetometer", 20), motion(rotation, "Rotation", 20), motion(gravity, "Gravity", 10),
-    ] + shared + deviceEntries(watch: false)
+    ] + shared + deviceEntries(watch: false) + radioEntries(watch: false)
 
     public static let watch = [
         motion(accelerometer, "Accelerometer", 25), motion(gyroscope, "Gyroscope", 25), motion(linearAcceleration, "Linear acceleration", 25),
         motion(magnetometer, "Magnetometer", 10), motion(rotation, "Rotation", 10), motion(gravity, "Gravity", 10),
-    ] + shared + deviceEntries(watch: true)
+    ] + shared + deviceEntries(watch: true) + radioEntries(watch: true)
 }
 
 /// This process's CPU time so far, which is how A3 measures cost.

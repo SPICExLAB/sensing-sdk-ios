@@ -25,6 +25,7 @@ public final class PhoneLink: LinkTransportDelegate {
 
     public private(set) var peer = PeerState()
     public var onStopRequested: ((String) -> Void)?
+    public nonisolated(unsafe) var onUwbToken: (@Sendable (Data) -> Void)?
     /// Something in `peer` changed.
     public var onChange: (() -> Void)?
 
@@ -113,6 +114,11 @@ public final class PhoneLink: LinkTransportDelegate {
         await engine.emit(SensorIDs.clock, "peer_clock", PeerClock.attributes(peer: device, peerMonoNs: mono, peerWallMs: wall, sentMonoNs: sentMono, sentWallMs: sentWall, repliedMonoNs: repliedMono))
     }
 
+    public func sendUwbToken(_ token: Data) {
+        guard transport.isReachable else { return }
+        transport.send(message: LinkMessage.uwbToken(token).encoded(), reply: nil, failed: nil)
+    }
+
     /// Chunks the watch said it recorded that aren't here.
     public func missingPeerChunks(recordingId: String) async -> [String] {
         guard let peer = recordings.find(id: recordingId)?.peer else { return [] }
@@ -166,6 +172,8 @@ public final class PhoneLink: LinkTransportDelegate {
             r.peerEngineSessions = summary.engineSessions
             try? recordings.save(r)
             onChange?()
+        case .uwbToken(let token):
+            onUwbToken?(token)
         case .desired, .ack, .clockPing, .clockReply:
             break
         }

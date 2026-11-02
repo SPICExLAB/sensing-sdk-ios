@@ -26,6 +26,7 @@ public final class WatchLink: LinkTransportDelegate {
     public static let orphanWorkoutMs: Int64 = 60_000
 
     public var onChange: (() -> Void)?
+    public nonisolated(unsafe) var onUwbToken: (@Sendable (Data) -> Void)?
     public let controller: RecordingController
     public let drainer: ChunkDrainer
 
@@ -93,6 +94,11 @@ public final class WatchLink: LinkTransportDelegate {
 
     /// The phone opened this app through `startWatchApp`. The workout has to begin at once, so it isn't waiting on anything.
     public func workoutLaunched() { workoutLaunchMs = clock.monoNs() / 1_000_000 }
+
+    public func sendUwbToken(_ token: Data) {
+        guard transport.isReachable else { return }
+        transport.send(message: LinkMessage.uwbToken(token).encoded(), reply: nil, failed: nil)
+    }
 
     /// The Stop button. This device stops now, whether or not the phone can be reached, and the phone hears when it can.
     public func stopPressed() async {
@@ -210,6 +216,8 @@ public final class WatchLink: LinkTransportDelegate {
             enqueue(state)
         case .ack(let ack):
             uploader.received(ack)
+        case .uwbToken(let token):
+            onUwbToken?(token)
         case .stopRequest, .clockPing, .clockReply, .status, .summary:
             break
         }

@@ -86,6 +86,8 @@ public enum LinkMessage: Codable, Sendable, Equatable {
     case status(PeerStatus)
     /// Everything the watch recorded, after it stopped, so the phone can see what's missing.
     case summary(PeerSummary)
+    /// A UWB discovery token, either way. It's only good while its session runs, so it's sent now or not at all, and re-sent.
+    case uwbToken(Data)
 
     public func encoded() -> Data { (try? JSONEncoder().encode(self)) ?? Data() }
     public static func decode(_ data: Data) -> LinkMessage? { try? JSONDecoder().decode(LinkMessage.self, from: data) }

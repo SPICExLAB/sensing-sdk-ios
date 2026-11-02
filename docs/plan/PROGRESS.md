@@ -15,6 +15,7 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 | P6 | ☐ | Location, activity, device state, sound, Bluetooth | A11 (rest), A12, A13 |
 | P7 | ☐ | Full example app, labels, export | A7, A14, A15 |
 | P8 | ☐ | Soak, tuning, docs; KB repo table updated and that page republished | A5, A6 |
+| Radio | ☐ | Cellular, Wi-Fi, network latency, heading, UWB distance (S-023) | R1, R2, R3 |
 
 ## P0
 
@@ -109,3 +110,14 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 - ☐ A7, A14 and A15 are still to come on real devices
 - ☑ Every recording needs a label: Start stays disabled and says why until an activity is chosen, and the choice clears after each recording, so a carried-over label can't mislabel the next one. Debug `-recordAutostart` is the only thing that picks one by itself
 - ☑ Export is on each row of the Recordings list as well as on the recording's own screen. Tested through the app's own flow on a simulator, 2026-11-02: the share sheet opened with the zip, real `unzip -t` passed, `sensing-decode --check` was clean, and the manifest carried the label and taxonomy id
+
+## Radio sensors
+
+- ☑ `CellularAdapter`, `WifiConnectionAdapter` and `NetworkLatencyAdapter` on the phone; `HeadingAdapter` and `UwbDistanceAdapter` on both. What they compute is pure and tested on macOS. Wi-Fi names and addresses are hashed there, before they can reach a sample
+- ☑ A signed device build, 2026-11-02: Apple accepted `com.apple.developer.networking.wifi-info` through automatic signing
+- ☑ All of them on a paired simulator, 25 s, through the real app, 2026-11-02, and `sensing-decode --check` was clean:
+  - `device.network_rtt`: a real probe, `connect_ms` 19, `smoothed_ms` 17, over Wi-Fi
+  - `device.peer_distance`: 26 samples at 1 Hz, so tokens crossed real WatchConnectivity both ways and ranging ran. Every distance was 0.0, the simulator's, so this says nothing about accuracy
+  - `device.cellular`: `radio=none`, `device.wifi`: `identity=unavailable`, as a simulator should. `loc.heading` reported `missing_hardware`
+- ☐ `device.network` read `ipv4=false` and `ipv6=false` on that working network. It may be the simulator. Check on a device in R1, and drop both if they read false there too
+- ☐ R1 to R3 on real devices: none of the radio adapters has run on one. R3 says whether a locked phone suspends UWB

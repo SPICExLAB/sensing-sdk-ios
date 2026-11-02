@@ -130,10 +130,12 @@ final class RecordModel {
         if let latest = recordings.first(where: { $0.endWallMs != nil }) { export(id: latest.id) }
     }
 
-    /// `devicectl device process launch … -- -recordAutostart YES -recordSeconds 60 -recordHz 100 -recordWatch NO`
+    /// `devicectl device process launch … -- -recordAutostart YES -recordSeconds 60 -recordHz 100 -recordWatch NO`, and
+    /// `-recordEnable device.network_rtt,loc.heading` to switch on sensors that are off by default.
     func runLaunchArguments() {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "recordAutostart") else { return }
+        for id in (defaults.string(forKey: "recordEnable") ?? "").split(separator: ",") { phoneChoices.enabled[String(id)] = true }
         let hz = Int64(defaults.integer(forKey: "recordHz"))
         if hz > 0 { phoneChoices.setAllMotion(hz: hz) }
         if defaults.object(forKey: "recordWatch") != nil { sensing?.recordWatch = defaults.bool(forKey: "recordWatch") }

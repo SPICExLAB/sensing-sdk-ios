@@ -7,12 +7,15 @@ struct SensorChoices: Codable, Equatable {
     /// By sensor id. A sensor that isn't here keeps its default.
     var enabled: [String: Bool] = [:]
     var hz: [String: Int64] = [:]
+    /// For what's slower than once a second, like location.
+    var seconds: [String: Int64]? = [:]
 
     var overrides: [SensorID: SensorOverride] {
         var out: [SensorID: SensorOverride] = [:]
-        for key in Set(enabled.keys).union(hz.keys) {
+        for key in Set(enabled.keys).union(hz.keys).union((seconds ?? [:]).keys) {
             guard let id = SensorID(key) else { continue }
-            out[id] = SensorOverride(enabled: enabled[key], samplingPeriodUs: hz[key].map { 1_000_000 / $0 })
+            let period = seconds?[key].map { $0 * 1_000_000 } ?? hz[key].map { 1_000_000 / $0 }
+            out[id] = SensorOverride(enabled: enabled[key], samplingPeriodUs: period)
         }
         return out
     }
@@ -69,6 +72,7 @@ private struct SensorList: View {
     @Binding var choices: SensorChoices
 
     private static let rates: [Int64] = [10, 25, 50, 100]
+    private static let locationSeconds: [Int64] = [1, 5, 10, 30, 60]
 
     var body: some View {
         ForEach(catalog, id: \.id) { entry in
@@ -81,6 +85,15 @@ private struct SensorList: View {
                     // Its default has to be on the list, or the picker shows nothing: the phone's magnetometer defaults to 20 Hz.
                     Picker("Rate", selection: Binding(get: { choices.hz[key] ?? standard }, set: { choices.hz[key] = $0 })) {
                         ForEach(Array(Set(Self.rates + [standard])).sorted(), id: \.self) { Text("\($0) Hz").tag($0) }
+                    }
+                    .disabled(!on)
+                } else if key == SensingCatalog.location.value, let period = entry.setting.samplingPeriodUs {
+                    Picker("Every", selection: Binding(get: { choices.seconds?[key] ?? period / 1_000_000 }, set: { value in
+                        var seconds = choices.seconds ?? [:]
+                        seconds[key] = value
+                        choices.seconds = seconds
+                    })) {
+                        ForEach(Self.locationSeconds, id: \.self) { Text("\($0) s").tag($0) }
                     }
                     .disabled(!on)
                 } else if !entry.detail.isEmpty {

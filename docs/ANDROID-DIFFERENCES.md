@@ -6,7 +6,9 @@ _Status: started 2026-11-02; each phase adds what it finds._
 
 ## Coverage
 
-**Not emitted on iOS (no public API or no usable equivalent):** `motion.significant_motion`, `env.light`, `env.proximity`, `env.ambient_temp`, `env.humidity`, `loc.gnss`, `loc.gnss_status`, `loc.gnss_measurements`, `device.wifi_scan`, `virtual.environment`.
+**Not emitted on iOS (no public API or no usable equivalent):** `motion.significant_motion`, `env.light`, `env.proximity`, `env.ambient_temp`, `env.humidity`, `loc.gnss`, `loc.gnss_status`, `loc.gnss_measurements`, `device.wifi_scan`, `virtual.environment`, `device.cell_scan`, `device.wifi_rtt`, `loc.gnss_satellites`.
+
+**On iOS only:** `loc.heading`; `device.peer_distance`, which needs UWB in both phone and watch and isn't built for Android yet.
 
 ## Meaning
 
@@ -22,6 +24,11 @@ _Status: started 2026-11-02; each phase adds what it finds._
 | `device.battery` | Temperature, voltage, health, plug type | None of those: `health` is `unknown`, `plugged` is `none` or `other`. Adds `low_power` and `thermal_state`. The watch is polled every 60 s |
 | `device.network` | Five transports | `wifi`, `cellular`, `ethernet`, `other`, `none`. A watch on its phone's connection reads `other` |
 | `device.audio_level` | `AudioRecord` | `AVAudioEngine` tap, same dBFS math. `silenced` can carry `reason`, such as `interruption` |
+| `device.cellular` | Radio, signal, cell details | Radio type and data restriction only: iOS has no API for the rest. Adds `services`, `data_restricted` |
+| `device.wifi` | Joined network with signal, speed and frequency | Hashed name and address, and security only. `identity=unavailable` means on Wi-Fi, but iOS won't say which network |
+| `device.network_rtt` | `connect_ms`, bandwidth estimates | `connect_ms` is the same TCP handshake, plus `smoothed_ms`, `min_ms`, `variance_ms` and `radio`, which can tell 5G sub-6 from mmWave |
+| `device.network` | Three fields | Adds `constrained`, `ipv4`, `ipv6`, and on iOS 26 `ultra_constrained` and `link_quality` |
+| `loc.fused` | Fixes and availability | Adds a `state` event: `accuracy` (full or reduced) and `floor` |
 | `label.session` `end_reason` | `stopped`, `time_limit`, `discarded`: a session outlives its process | Adds `process_died`, since a phone crash ends the recording (S-011). The ingest reads an unknown reason as `stopped` (`labels.go:104-107`), so it's safe today but loses the reason until the ingest learns it |
 | `device.session end` `reason` | Android's reasons | Adds `user_stop`, `watch_stop`, `phone_stop`, `superseded`, `keepalive_lost`, `recovery_done`, and on start `workout_recovery` |
 | `device.health heartbeat` | Its own attributes | Additive `cpu_ms`, `uptime_ms`, `battery_pct`, `is_charging`, `low_power`, `thermal_state`, which is how A3 and A6 measure cost |
