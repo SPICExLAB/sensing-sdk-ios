@@ -29,7 +29,7 @@ Read [`README.md`](README.md), then [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS
 |---|---|
 | `Sources/SensingProto` | Generated from `proto/` by `scripts/gen-proto.sh`; committed |
 | `Sources/SensingCore` | Clock, sensor ids, conversions, hashing, intake, the adapter protocol, config |
-| `Sources/SensingEngine` | The recording engine and activity sessions |
+| `Sources/SensingEngine` | The recording engine, activity sessions, `RecordingController` (a recording's whole flow, with no platform code), and `ChunkDrainer` with the `ChunkUploader` seam |
 | `Sources/SensingStorage` | Frames, gzip, chunks, recovery, retention |
 | `Sources/SensingAdapters` | One adapter per sensor; adapters never touch disk |
 | `Sources/SensingLink` | WatchConnectivity behind a protocol |

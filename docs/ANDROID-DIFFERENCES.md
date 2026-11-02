@@ -19,6 +19,7 @@ _Status: started 2026-11-02; each phase adds what it finds._
 | `device.screen` | Real screen on and off | Approximate: lock state on the phone, app active state on the watch |
 | `device.bluetooth_scan` | All devices, by MAC address | All devices when open, a fixed list of services when locked; by a per-device UUID |
 | `label.session` `end_reason` | `stopped`, `time_limit`, `discarded`: a session outlives its process | Adds `process_died`, since a phone crash ends the recording (S-011). The ingest reads an unknown reason as `stopped` (`labels.go:104-107`), so it's safe today but loses the reason until the ingest learns it |
+| `device.session end` `reason` | Android's reasons | Adds `user_stop`, `watch_stop`, `phone_stop`, `superseded`, `keepalive_lost`, `recovery_done`, and on start `workout_recovery` |
 | `device.health heartbeat` | Its own attributes | Additive `cpu_ms`, `uptime_ms`, `battery_pct`, `is_charging`, `low_power`, `thermal_state`, which is how A3 and A6 measure cost |
 
 ## Android behaviour deliberately not copied

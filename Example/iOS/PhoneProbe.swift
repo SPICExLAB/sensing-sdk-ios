@@ -10,8 +10,6 @@ import UIKit
 final class PhoneProbe {
     var mode: KeepAliveMode = .location100m
     var hz: Double = 50
-    var watchHz: Double = 50
-    var alsoWatch = true
 
     private(set) var recording = false
     private(set) var startedAt: Date?
@@ -24,21 +22,12 @@ final class PhoneProbe {
     private let keepAlive = KeepAliveController()
     private var recorder: ProbeRecorder?
     private var observers: [NSObjectProtocol] = []
-    private var generation = Int64(Date().timeIntervalSince1970)
     private let health = HKHealthStore()
     private var timer: Timer?
     private var ticks: Int64 = 0
 
     init() {
         UIDevice.current.isBatteryMonitoringEnabled = true
-        ProbeLink.shared.onTransfer = { [weak self] text in
-            Task { @MainActor in self?.say(text); self?.refreshRuns() }
-        }
-        ProbeLink.shared.onMessage = { [weak self] message in
-            guard message["request"] as? String == "stop" else { return }
-            Task { @MainActor in self?.stop() }
-        }
-        ProbeLink.shared.activate()
         refreshRuns()
     }
 
@@ -73,7 +62,6 @@ final class PhoneProbe {
             r.event("device", Self.deviceNote())
             startTimer()
             say("started \(mode.rawValue) at \(Int64(hz)) Hz")
-            if alsoWatch { startWatch(run: r.directory.lastPathComponent) }
         } catch {
             say("start failed: \(error)")
             recorder?.event("start_failed", String(describing: error))
@@ -82,8 +70,6 @@ final class PhoneProbe {
 
     func stop() {
         guard recording else { return }
-        generation += 1
-        ProbeLink.shared.publish(["gen": generation, "desired": "stopped"])
         keepAlive.stop()
         recorder?.event("device", Self.deviceNote())
         recorder?.stop()
@@ -123,7 +109,6 @@ final class PhoneProbe {
         let defaults = UserDefaults.standard
         guard let name = defaults.string(forKey: "probeAutostart"), let wanted = KeepAliveMode(rawValue: name) else { return }
         mode = wanted
-        alsoWatch = false
         start()
         let seconds = max(defaults.double(forKey: "probeSeconds"), 3)
         Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
@@ -135,21 +120,6 @@ final class PhoneProbe {
     func delete(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
         refreshRuns()
-    }
-
-    private func startWatch(run: String) {
-        generation += 1
-        ProbeLink.shared.publish(["gen": generation, "desired": "recording", "hz": watchHz, "run": run])
-        let config = HKWorkoutConfiguration()
-        config.activityType = .other
-        config.locationType = .unknown
-        health.startWatchApp(with: config) { [weak self] ok, error in
-            let text = "startWatchApp ok=\(ok) \(error.map { String(describing: $0) } ?? "")"
-            Task { @MainActor in
-                self?.say(text)
-                self?.recorder?.event("start_watch", text)
-            }
-        }
     }
 
     private func observeAppState(_ r: ProbeRecorder) {

@@ -21,6 +21,23 @@ public struct ChunkRecord: Codable, Sendable, Equatable {
     /// The device that recorded it: on the phone, a watch chunk keeps the watch's id.
     public var deviceId: String
 
+    public init(chunkId: String, sessionId: String, sensorId: String, firstSeq: Int64, lastSeq: Int64, firstTsMono: Int64, lastTsMono: Int64,
+                firstWallMs: Int64, lastWallMs: Int64, bytes: Int64, sha256: String, frames: Int64, deviceId: String) {
+        self.chunkId = chunkId
+        self.sessionId = sessionId
+        self.sensorId = sensorId
+        self.firstSeq = firstSeq
+        self.lastSeq = lastSeq
+        self.firstTsMono = firstTsMono
+        self.lastTsMono = lastTsMono
+        self.firstWallMs = firstWallMs
+        self.lastWallMs = lastWallMs
+        self.bytes = bytes
+        self.sha256 = sha256
+        self.frames = frames
+        self.deviceId = deviceId
+    }
+
     public static func id(session: String, sensor: String, firstSeq: Int64) -> String { "\(session)/\(sensor)_\(firstSeq)" }
 }
 

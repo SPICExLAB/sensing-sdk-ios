@@ -71,6 +71,7 @@ final class RecordModel {
         guard defaults.bool(forKey: "recordAutostart") else { return }
         let hz = Int64(defaults.integer(forKey: "recordHz"))
         if hz > 0 { motionHz = hz }
+        if defaults.object(forKey: "recordWatch") != nil { sensing?.recordWatch = defaults.bool(forKey: "recordWatch") }
         let seconds = max(defaults.double(forKey: "recordSeconds"), 3)
         Task {
             // This runs before the scene is active, and keep-alive can only begin in the foreground.
@@ -96,9 +97,10 @@ final class RecordModel {
 }
 
 struct RecordView: View {
-    @State private var model = RecordModel()
+    let model: RecordModel
 
     var body: some View {
+        @Bindable var model = model
         NavigationStack {
             List {
                 Section {
@@ -112,6 +114,9 @@ struct RecordView: View {
                             Picker("Motion rate", selection: $model.motionHz) {
                                 Text("Defaults").tag(Int64(50))
                                 Text("All at 100 Hz").tag(Int64(100))
+                            }
+                            if sensing.status.watchInstalled {
+                                Toggle("Also record on the watch", isOn: Binding(get: { sensing.recordWatch }, set: { sensing.recordWatch = $0 }))
                             }
                             Button("Start") { model.start() }
                             if !sensing.hasLocationPermission {
@@ -131,11 +136,28 @@ struct RecordView: View {
                         LabeledContent("Waiting / dropped", value: "\(status.pending) / \(status.dropped)").font(.caption)
                     }
                 }
+                if let status = model.sensing?.status, status.watchInstalled {
+                    Section("Watch") {
+                        LabeledContent("Link", value: status.peer.reachable ? "Reachable" : "Not reachable").font(.caption)
+                        LabeledContent("Chunks received", value: String(status.peer.received)).font(.caption)
+                        if status.peer.refused > 0 { LabeledContent("Chunks refused", value: String(status.peer.refused)).font(.caption).foregroundStyle(.red) }
+                        if let peer = status.peer.status, peer.recordingId != nil, status.recording != nil {
+                            ForEach(peer.hz.keys.sorted().filter { $0.hasPrefix("motion.") || $0.hasPrefix("env.") }, id: \.self) { name in
+                                LabeledContent(name, value: "\(peer.hz[name]!.formatted(.number.precision(.fractionLength(1)))) Hz").font(.caption)
+                            }
+                            LabeledContent("Waiting to send / dropped", value: "\(peer.chunksWaiting) / \(peer.dropped)").font(.caption)
+                            if let pct = peer.batteryPct { LabeledContent("Battery", value: "\(pct)%").font(.caption) }
+                        }
+                    }
+                }
                 Section("Recordings") {
                     ForEach(model.recordings) { r in
                         VStack(alignment: .leading) {
                             Text(r.label)
                             Text("\(Date(timeIntervalSince1970: Double(r.startWallMs) / 1000).formatted()) · \(r.endReason ?? "open")").font(.caption)
+                            if let peer = r.peer {
+                                Text("Watch: \(peer.endReason), \(peer.chunkIds.count) chunks").font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }

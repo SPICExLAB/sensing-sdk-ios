@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy the probe runs off the iPhone and the watch into exports/ (gitignored: this can be participants' data).
+# Copy the probe runs off the iPhone into exports/ (gitignored: this can be participants' data).
 #   tools/fetch_probe.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -11,5 +11,4 @@ fetch() { # udid, bundle id, destination
     --domain-identifier "$2" --source Documents/probe --destination "$3" | tail -1
 }
 fetch "$(udid iPhone)" com.rahulislam.sensing.example exports/probe
-fetch "$(udid 'Apple Watch')" com.rahulislam.sensing.example.watchkitapp exports/watch-probe
-echo "now: python3 tools/probe_report.py exports/probe exports/watch-probe"
+echo "now: python3 tools/probe_report.py exports/probe"

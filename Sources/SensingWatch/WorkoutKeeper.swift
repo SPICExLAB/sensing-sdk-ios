@@ -1,6 +1,7 @@
 #if os(watchOS)
 import Foundation
 import HealthKit
+import SensingLink
 
 /// Keeps the watch app running with the screen off: a workout session is the only way to get continuous motion data on
 /// Apple Watch. It writes nothing to Health (there's no workout builder) and never reads heart rate.
@@ -32,7 +33,9 @@ public final class WorkoutKeeper: NSObject, @unchecked Sendable {
         return config
     }
 
-    public func start(_ configuration: HKWorkoutConfiguration = WorkoutKeeper.defaultConfiguration()) throws {
+    public func start() throws { try start(Self.defaultConfiguration()) }
+
+    public func start(_ configuration: HKWorkoutConfiguration) throws {
         guard !isRunning else { return }
         let s = try HKWorkoutSession(healthStore: store, configuration: configuration)
         s.delegate = self  // set before starting, so no state change is missed
@@ -50,7 +53,7 @@ public final class WorkoutKeeper: NSObject, @unchecked Sendable {
         return true
     }
 
-    public func end() {
+    public func stop() {
         let s = lock.withLock { () -> HKWorkoutSession? in
             defer { session = nil }
             return session
@@ -58,6 +61,8 @@ public final class WorkoutKeeper: NSObject, @unchecked Sendable {
         s?.end()
     }
 }
+
+extension WorkoutKeeper: WatchKeepAlive {}
 
 extension WorkoutKeeper: HKWorkoutSessionDelegate {
     public func workoutSession(_ s: HKWorkoutSession, didChangeTo to: HKWorkoutSessionState, from: HKWorkoutSessionState, date: Date) {

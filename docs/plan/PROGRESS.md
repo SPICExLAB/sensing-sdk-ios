@@ -75,3 +75,16 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 - ☑ A minimal Record tab in the example app, driven from the command line in debug builds for device tests
 - ☑ First real chunks, iPhone 15 Pro, iOS 26.7.1, 2026-11-02, screen on and at rest, debug build, 40 s with the six motion streams at 100 Hz: 100.53 Hz, nothing lost, no motion gap over 10 ms, `sensing-decode --check` clean, 8.1% of one core. Gravity 9.807 m/s² with Android's signs, linear acceleration and gyroscope near zero, field 40 µT, unit quaternions, 997.5 hPa. About 14 KiB/s on disk at that rate
 - ☐ A1, A3, A4 and A11 (phone)
+
+## P5
+
+- ☑ `SensingLink`: the phone-watch protocol, with WatchConnectivity behind `LinkTransport`, so all of it runs against a fake on macOS. `PhoneLink`, `WatchLink`, `ChunkReceiver`, `PhoneRelayUploader` and `WCLinkTransport`
+- ☑ `ChunkUploader` and `ChunkDrainer` (`SensingEngine`): Android's `UploadTransport`, with the watch's route to the phone as its first implementation, at most 4 at a time, retrying from 30 s doubling to an hour, ±20%
+- ☑ `WatchSensing`, the watch's public API, on `WorkoutKeeper` and the same `RecordingController` as the phone. A watch crash with the workout alive resumes the recording in a new engine session, with `process_death` recorded
+- ☑ `Sensing` starts the watch with `startWatchApp`, tries once more after 5 s, and records `peer_start_failed` with a banner if that fails too. A relaunched phone tells the watch to stop
+- ☑ A watch screen and a Watch section on the phone's Record tab. Both apps build for real devices
+- ☑ The Phase 1 watch probe and `ProbeLink` are gone, since a `WCSession` has one delegate. The phone's bare recorder stays in Diagnostics. Their evidence is in P1 above, and the code is in git history
+- ☑ 42 link tests with a fake link: newest generation only, across relaunches; the link down, with the watch recording on to its time limit; Stop on the watch, with and without the link; crashes on both sides; lost and duplicate acks; a corrupt file; the same id with other bytes; bad ids; four at a time. The thread sanitizer is clean on them
+- Testing and review found 4 real bugs, all fixed: a duplicate `bad` ack failed every later attempt unsent; a drain could delete the metadata of a chunk still arriving, stranding it; a state arriving before recovery finished could start a recording mid-recovery; a watch recording ended by a crash never told the phone. The second is a race, and the test for it failed only 1 run in 6 with the fix removed, so it can catch that bug but won't every time
+- A refinement to the plan: the watch's Stop button stops the watch at once and tells the phone, rather than waiting for the phone's answer when it's reachable. It's one code path, and the phone stopping is unchanged
+- ☐ **Nothing in this phase has run on a device.** The link has only met the fake, so real WatchConnectivity behaviour is unproven: delivery with the phone locked, the watch's reachability wrist-down, `startWatchApp` under the SDK. A2, A8, A9 and A10 are still to come

@@ -8,10 +8,7 @@ struct ExampleWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            WatchDiagnosticsView(probe: WatchProbe.shared)
-                #if DEBUG
-                .task { WatchProbe.shared.runLaunchArguments() }
-                #endif
+            WatchRecordView(model: WatchModel.shared)
         }
     }
 }
@@ -19,14 +16,15 @@ struct ExampleWatchApp: App {
 /// The iPhone opens this app with HKHealthStore.startWatchApp, and the system reopens it if it dies mid-workout.
 final class WatchDelegate: NSObject, WKApplicationDelegate {
     func applicationDidFinishLaunching() {
-        _ = WatchProbe.shared
+        WatchModel.shared.prepare()
     }
 
     func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
-        WatchProbe.shared.handle(workoutConfiguration)
+        WatchModel.shared.sensing?.handle(workoutConfiguration)
+        WatchModel.shared.prepare()
     }
 
     func handleActiveWorkoutRecovery() {
-        WatchProbe.shared.recover()
+        WatchModel.shared.prepare()
     }
 }

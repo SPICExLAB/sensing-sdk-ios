@@ -4,6 +4,7 @@ import Observation
 import SensingAdapters
 import SensingCore
 import SensingEngine
+import SensingLink
 import SensingStorage
 import UIKit
 
@@ -39,6 +40,8 @@ public final class Sensing {
         public var dropped: Int64 = 0
         public var storageFraction = 0.0
         public var warnings: [String] = []
+        public var peer = PhoneLink.PeerState()
+        public var watchInstalled = false
     }
 
     public private(set) var status = Status()
@@ -47,6 +50,10 @@ public final class Sensing {
         didSet { controller.overrides = overrides }
     }
     public var keepAlive: KeepAliveMode
+    /// Also record on the paired watch, when it has this app.
+    public var recordWatch = true
+    /// The watch's own settings: its defaults are lower than the phone's.
+    public var watchOverrides: [SensorID: SensorOverride] = [:]
 
     /// A recording ended without being asked to, such as a full disk.
     public var onEnded: ((RecordingSummary) -> Void)?
@@ -56,6 +63,10 @@ public final class Sensing {
     private let keepAliveController = KeepAliveController()
     private let motion: MotionAdapter
     private let battery: BatterySnapshot
+    private let link: PhoneLink
+    private let watchStarter = WatchStarter()
+    private var peerWarning: String?
+    private var preparing: Task<Void, Never>?
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
 
@@ -75,14 +86,23 @@ public final class Sensing {
         controller = RecordingController(
             root: root, deviceId: try DeviceIdentity.load(root: root), catalog: SensingCatalog.phone,
             adapters: [motion, AltimeterAdapter(), PedometerAdapter()],
-            device: DeviceDescription(platform: "ios", model: Self.machine(), os: "\(device.systemName) \(device.systemVersion)", appVersion: options.appVersion, sdkVersion: SDK.version),
+            device: DeviceDescription(platform: "ios", model: DeviceModel.machine(), os: "\(device.systemName) \(device.systemVersion)", appVersion: options.appVersion, sdkVersion: SDK.version),
             options: engine)
+        link = PhoneLink(transport: WCLinkTransport(), root: root, engine: controller.engine, recordings: controller.recordings)
         controller.onEnded = { [weak self] summary in
             guard let self else { return }
             self.endKeepAlive()
+            if self.link.desired?.recording != nil { self.link.publish(recording: nil) }
             self.refresh()
             self.onEnded?(summary)
         }
+        link.onStopRequested = { [weak self] id in
+            guard let self, self.controller.current?.id == id else { return }
+            Task { await self.stop(reason: "watch_stop") }
+        }
+        link.onChange = { [weak self] in self?.refresh() }
+        // Now, not at `prepare`: WatchConnectivity can launch this app in the background to hand it a chunk.
+        link.activate()
         keepAliveController.onEvent = { [weak self] kind, detail in
             Task { @MainActor in self?.keepAliveEvent(kind, detail) }
         }
@@ -91,8 +111,14 @@ public final class Sensing {
 
     /// Call once at launch: seals what a dead process left, and ends its recording.
     public func prepare() async {
-        await controller.recover()
-        refresh()
+        if preparing == nil {
+            preparing = Task { @MainActor in
+                await controller.recover()
+                link.reconcile(activeRecordingId: controller.current?.id)
+                refresh()
+            }
+        }
+        await preparing?.value
     }
 
     public func requestLocationPermission() { keepAliveController.requestLocationPermission() }
@@ -104,13 +130,15 @@ public final class Sensing {
     }
 
     public func start(_ spec: RecordingSpec) async throws {
+        await prepare()
         guard UIApplication.shared.applicationState == .active else { throw SensingError.notInForeground }
         if keepAlive == .location100m || keepAlive == .location3km {
             guard hasLocationPermission else { throw SensingError.needsLocationPermission }
         }
         try keepAliveController.start(keepAlive)
+        let summary: RecordingSummary
         do {
-            try await controller.start(spec)
+            summary = try await controller.start(spec)
         } catch {
             keepAliveController.stop()
             throw error
@@ -119,23 +147,36 @@ public final class Sensing {
             await controller.engine.emit(SensorIDs.health, "attitude_frame", ["north": "none"])
         }
         startWatching()
+        peerWarning = nil
+        // The phone never waits for the watch: it's recording already.
+        if recordWatch, link.transport.isCounterpartInstalled {
+            link.publish(recording: PeerRecording(id: spec.id, label: spec.label, startWallMs: summary.startWallMs, maxDurationMs: spec.maxDurationMs, overrides: watchOverrides))
+            startWatch()
+            await link.pairClock()
+        }
         refresh()
     }
 
     public func stop(answers: [String: String] = [:]) async {
-        await controller.stop(answers: answers)
-        endKeepAlive()
+        await stop(answers: answers, reason: "user_stop")
+    }
+
+    private func stop(answers: [String: String] = [:], reason: String) async {
+        await link.pairClock()
+        await controller.stop(answers: answers, reason: reason)
         refresh()
     }
 
     /// Ends it and deletes its label: it was started by mistake. The sensor data stays.
     public func discard() async {
         await controller.discard()
-        endKeepAlive()
         refresh()
     }
 
     public func recordings() -> [RecordingSummary] { controller.recordings.all() }
+
+    /// Chunks the watch said it recorded that haven't arrived.
+    public func missingWatchChunks(recordingId: String) async -> [String] { await link.missingPeerChunks(recordingId: recordingId) }
 
     private func startWatching() {
         timer?.invalidate()
@@ -145,6 +186,7 @@ public final class Sensing {
                 self.refreshBattery()
                 Task { @MainActor in
                     await self.controller.tick()
+                    await self.link.tick()
                     self.refresh()
                 }
             }
@@ -167,6 +209,17 @@ public final class Sensing {
         }
     }
 
+    /// `startWatchApp` wakes the watch app, which begins its workout at once and then does what `link` published.
+    private func startWatch() {
+        let engine = controller.engine
+        watchStarter.start { [weak self] ok, detail in
+            guard !ok else { return }
+            self?.peerWarning = "The watch didn't start: \(detail). This recording continues on the phone alone."
+            Task { await engine.emit(SensorIDs.health, "peer_start_failed", ["detail": detail]) }
+            self?.refresh()
+        }
+    }
+
     private func endKeepAlive() {
         keepAliveController.stop()
         timer?.invalidate()
@@ -180,7 +233,10 @@ public final class Sensing {
         Task { @MainActor in
             let stats = await controller.engine.stats()
             var s = Status(recording: controller.current, streams: stats.streams, pending: stats.pending, dropped: stats.dropped, storageFraction: stats.storage.fraction)
+            s.peer = link.peer
+            s.watchInstalled = link.transport.isCounterpartInstalled
             if s.storageFraction >= 0.8 { s.warnings.append("Storage is \(Int64(s.storageFraction * 100))% full. Export and delete recordings; recording stops at 100%.") }
+            if let peerWarning, s.recording != nil { s.warnings.append(peerWarning) }
             if status != s { status = s }
         }
     }
@@ -195,7 +251,6 @@ public final class Sensing {
         Task { @MainActor in
             await engine.emit(SensorIDs.health, "keepalive_lost", ["status": detail])
             await controller.stop(reason: "keepalive_lost")
-            endKeepAlive()
             refresh()
             UIApplication.shared.endBackgroundTask(task)
         }
@@ -207,36 +262,5 @@ public final class Sensing {
         let device = UIDevice.current
         battery.store(level: device.batteryLevel, charging: device.batteryState == .charging || device.batteryState == .full)
     }
-
-    private static func machine() -> String {
-        var info = utsname()
-        uname(&info)
-        return withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-    }
-}
-
-private final class BatterySnapshot: @unchecked Sendable {
-    private let lock = NSLock()
-    private var level: Float = -1
-    private var charging = false
-
-    func store(level: Float, charging: Bool) {
-        lock.withLock {
-            self.level = level
-            self.charging = charging
-        }
-    }
-
-    func attributes() -> [String: String] {
-        let (level, charging) = lock.withLock { (level, charging) }
-        let info = ProcessInfo.processInfo
-        var attrs = ["low_power": info.isLowPowerModeEnabled ? "true" : "false", "thermal_state": String(info.thermalState.rawValue), "is_charging": charging ? "true" : "false"]
-        if level >= 0 { attrs["battery_pct"] = String(Int64((level * 100).rounded())) }
-        return attrs
-    }
-}
-
-public enum SDK {
-    public static let version = "0.1.0"
 }
 #endif

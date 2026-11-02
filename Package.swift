@@ -25,7 +25,7 @@ let package = Package(
         // CoreMotion, CoreLocation, audio, Bluetooth, network, battery, screen. Empty on macOS.
         .target(name: "SensingAdapters", dependencies: ["SensingCore", "SensingProto"]),
         // WatchConnectivity behind a protocol, so tests use a fake.
-        .target(name: "SensingLink", dependencies: ["SensingCore"]),
+        .target(name: "SensingLink", dependencies: ["SensingCore", "SensingStorage", "SensingEngine", "SensingProto"]),
         // iPhone: the public API, keep-alive, starting the watch app, receiving chunks.
         .target(name: "SensingKit", dependencies: ["SensingCore", "SensingStorage", "SensingEngine", "SensingAdapters", "SensingLink"]),
         // Apple Watch: the public API, workout session and recovery, sending chunks.
@@ -37,5 +37,6 @@ let package = Package(
         .testTarget(name: "SensingCoreTests", dependencies: ["SensingCore", "SensingProto"]),
         .testTarget(name: "SensingStorageTests", dependencies: ["SensingStorage", "SensingProto"]),
         .testTarget(name: "SensingEngineTests", dependencies: ["SensingEngine", "SensingCore", "SensingStorage", "SensingProto"]),
+        .testTarget(name: "SensingLinkTests", dependencies: ["SensingLink", "SensingEngine", "SensingCore", "SensingStorage", "SensingProto"]),
     ]
 )

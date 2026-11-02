@@ -25,6 +25,24 @@ public struct RecordingSpec: Sendable, Equatable {
     }
 }
 
+/// What the watch says it recorded for one recording, once it has stopped. Whatever's listed here and not on the phone is
+/// still on its way, or lost.
+public struct PeerSummary: Codable, Sendable, Equatable {
+    public var recordingId: String
+    public var deviceId: String
+    public var endReason: String
+    public var engineSessions: [String]
+    public var chunkIds: [String]
+
+    public init(recordingId: String, deviceId: String, endReason: String, engineSessions: [String], chunkIds: [String]) {
+        self.recordingId = recordingId
+        self.deviceId = deviceId
+        self.endReason = endReason
+        self.engineSessions = engineSessions
+        self.chunkIds = chunkIds
+    }
+}
+
 public struct RecordingSummary: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var label: String
@@ -34,6 +52,9 @@ public struct RecordingSummary: Codable, Sendable, Equatable, Identifiable {
     public var endReason: String?
     /// Engine sessions on this device, in order. Normally one.
     public var engineSessions: [String]
+    /// The watch's engine sessions, as soon as the phone hears of them.
+    public var peerEngineSessions: [String]?
+    public var peer: PeerSummary?
 
     public init(id: String, label: String, taxonomyId: String?, startWallMs: Int64, endWallMs: Int64? = nil, endReason: String? = nil, engineSessions: [String] = []) {
         self.id = id
@@ -69,6 +90,10 @@ public final class RecordingStore: @unchecked Sendable {
     public func delete(id: String) {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(id).json"))
     }
+
+    public func find(id: String) -> RecordingSummary? {
+        (try? Data(contentsOf: directory.appendingPathComponent("\(id).json"))).flatMap { try? JSONDecoder().decode(RecordingSummary.self, from: $0) }
+    }
 }
 
 /// What a device says about itself on `device.session start`: the envelope has no field for the platform.
@@ -78,8 +103,11 @@ public struct DeviceDescription: Sendable, Equatable {
     public var os: String
     public var appVersion: String
     public var sdkVersion: String
+    /// The watch adds `wrist` and `crown`.
+    public var extras: [String: String]
 
-    public init(platform: String, model: String, os: String, appVersion: String, sdkVersion: String) {
+    public init(platform: String, model: String, os: String, appVersion: String, sdkVersion: String, extras: [String: String] = [:]) {
+        self.extras = extras
         self.platform = platform
         self.model = model
         self.os = os
@@ -88,7 +116,7 @@ public struct DeviceDescription: Sendable, Equatable {
     }
 
     var attributes: [String: String] {
-        ["platform": platform, "model": model, "os": os, "app_version": appVersion, "sdk_version": sdkVersion]
+        extras.merging(["platform": platform, "model": model, "os": os, "app_version": appVersion, "sdk_version": sdkVersion]) { _, new in new }
     }
 }
 
@@ -108,7 +136,7 @@ public final class RecordingController {
     public private(set) var state = State.stopped
     public private(set) var current: RecordingSummary?
     public var overrides: [SensorID: SensorOverride] = [:]
-    /// The recording ended without being asked to: its reason, such as a full disk or the time limit.
+    /// A recording ended, for whatever reason: a stop, a full disk, the time limit, or at recovery, a process that died.
     public var onEnded: ((RecordingSummary) -> Void)?
 
     public let engine: CollectionEngine
@@ -142,13 +170,18 @@ public final class RecordingController {
 
     /// At launch: seals what a dead process left, and ends its recording. A crash ends the recording rather than resuming it
     /// (S-011). A short session writes what's owed, since no engine is running to write it.
-    public func recover() async {
-        try? await commands.run { [self] in await recoverNow() }
+    ///
+    /// `resuming`: on the watch, the system kept the workout alive through the crash, so the same recording carries on in a new
+    /// engine session, with the gap recorded.
+    public func recover(resuming: Bool = false) async {
+        try? await commands.run { [self] in await recoverNow(resuming: resuming) }
     }
 
+    /// `mirroredStartWallMs`: this device is running the paired phone's recording, which started then. It has the same time
+    /// limit and records no labels: those are the phone's.
     @discardableResult
-    public func start(_ spec: RecordingSpec) async throws -> RecordingSummary {
-        try await commands.run { [self] in try await startNow(spec) }
+    public func start(_ spec: RecordingSpec, mirroredStartWallMs: Int64? = nil) async throws -> RecordingSummary {
+        try await commands.run { [self] in try await startNow(spec, mirroredStartWallMs: mirroredStartWallMs) }
     }
 
     public func stop(answers: [String: String] = [:], reason: String = "user_stop") async {
@@ -174,10 +207,14 @@ public final class RecordingController {
 
     // MARK: - The commands
 
-    private func startNow(_ spec: RecordingSpec) async throws -> RecordingSummary {
+    private func startNow(_ spec: RecordingSpec, mirroredStartWallMs: Int64?) async throws -> RecordingSummary {
         guard state == .stopped else { throw ControllerError.alreadyRecording }
         let session = SessionSpec(sessionId: spec.id, label: spec.label, maxDurationMs: spec.maxDurationMs, startAttrs: spec.startAttrs, labelAttrs: spec.labelAttrs)
-        try sessions.start(session)
+        if let mirroredStartWallMs {
+            sessions.mirror(ActiveSession(spec: session, startWallMs: mirroredStartWallMs, startMonoNs: clock.monoNs(), mirrored: true))
+        } else {
+            try sessions.start(session)
+        }
         var attrs = device.attributes
         attrs["activity_session_id"] = spec.id
         var summary = RecordingSummary(id: spec.id, label: spec.label, taxonomyId: spec.labelAttrs["taxonomy_id"], startWallMs: clock.wallMs())
@@ -231,9 +268,20 @@ public final class RecordingController {
         }
     }
 
-    private func recoverNow() async {
+    private func recoverNow(resuming: Bool) async {
         await engine.recover()
         let dead = recordings.unfinished
+        if resuming, var dead {
+            let from = lastWall(dead, await engine.chunks())
+            var attrs = device.attributes
+            attrs["activity_session_id"] = dead.id
+            if let session = await engine.start(effectiveConfig(), adapters: adapters, reason: "workout_recovery", attrs: attrs) { dead.engineSessions.append(session) }
+            await engine.emit(SensorIDs.gap, "process_death", ["recording_id": dead.id, "from_wall_ms": String(from), "to_wall_ms": String(clock.wallMs())])
+            try? recordings.save(dead)
+            current = dead
+            state = .recording
+            return
+        }
         if let dead, sessions.active != nil {
             let chunks = await engine.chunks().filter { dead.engineSessions.contains($0.sessionId) }
             let lastWall = chunks.map(\.lastWallMs).max() ?? dead.startWallMs
@@ -255,6 +303,7 @@ public final class RecordingController {
             dead.endWallMs = chunks.map(\.lastWallMs).max() ?? dead.startWallMs
             dead.endReason = "process_died"
             try? recordings.save(dead)
+            onEnded?(dead)
         }
     }
 

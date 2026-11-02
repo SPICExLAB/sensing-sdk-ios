@@ -19,15 +19,6 @@ struct DiagnosticsView: View {
                         Text("100 Hz").tag(100.0)
                     }
                     .disabled(probe.recording)
-                    Toggle("Also start the watch", isOn: $probe.alsoWatch).disabled(probe.recording)
-                    if probe.alsoWatch {
-                        Picker("Watch rate", selection: $probe.watchHz) {
-                            Text("25 Hz").tag(25.0)
-                            Text("50 Hz").tag(50.0)
-                            Text("100 Hz").tag(100.0)
-                        }
-                        .disabled(probe.recording)
-                    }
                     if probe.recording {
                         Button("Stop", role: .destructive) { probe.stop() }
                         if let startedAt = probe.startedAt {

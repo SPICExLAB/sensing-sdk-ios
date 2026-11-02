@@ -15,12 +15,12 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2" # raise it for every build you install: watchOS only updates the watch app to a higher build
+    CURRENT_PROJECT_VERSION: "3" # raise it for every build you install: watchOS only updates the watch app to a higher build
 targets:
   Example:
     type: application
     platform: iOS
-    sources: [iOS, Shared]
+    sources: [iOS]
     dependencies:
       - package: SensingSDK
         product: SensingKit
@@ -53,7 +53,7 @@ targets:
   ExampleWatch:
     type: application
     platform: watchOS
-    sources: [Watch, Shared]
+    sources: [Watch]
     dependencies:
       - package: SensingSDK
         product: SensingWatch
