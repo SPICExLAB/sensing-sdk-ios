@@ -8,3 +8,7 @@ xcuserdata/
 # Exports and decoded data are participants' data: they never belong in the repo
 exports/
 *.csv
+# The Gradle tool that scripts/compat.sh runs
+.gradle/
+.kotlin/
+tools/android-compat/build/

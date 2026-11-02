@@ -42,7 +42,13 @@ no_locale_number_format() {
   ! grep -rnE 'String\(format:' Sources/SensingCore Sources/SensingStorage Sources/SensingAdapters --include='*.swift' | grep -v 'locale:'
 }
 
+# Build output has been committed by accident once (P2), which a glance at the diff stat should have caught.
+no_build_output_tracked() {
+  ! git ls-files | grep -E '(^|/)(\.build|\.gradle|\.kotlin|build|DerivedData)/'
+}
+
 job proto-matches-android proto_matches_android
+job no-build-output-tracked no_build_output_tracked
 job no-await-in-engine no_await_in_engine
 job no-int-conversions no_int_conversions
 job uuids-are-lowercase uuids_are_lowercase
