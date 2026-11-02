@@ -1,0 +1,80 @@
+# The example data-collection app, built on the SDK in this repo. Generate the project with `xcodegen generate` in this
+# folder (.xcodeproj is gitignored).
+name: SensingExample
+options:
+  bundleIdPrefix: com.rahulislam.sensing
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+packages:
+  SensingSDK:
+    path: ..
+settings:
+  base:
+    DEVELOPMENT_TEAM: 3F2DL4L5F5 # the team the Companion builds with
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1" # raise it for every build you install: watchOS only updates the watch app to a higher build
+targets:
+  Example:
+    type: application
+    platform: iOS
+    sources: [iOS, Shared]
+    dependencies:
+      - package: SensingSDK
+        product: SensingKit
+      - target: ExampleWatch
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Sensing Example
+        CFBundleName: Sensing Example
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [location, workout-processing] # audio and bluetooth-central come with those sensors (P6), so they can't hide a keep-alive failure here
+        UIFileSharingEnabled: true # recordings can be copied off with `devicectl device copy` or Finder
+        LSSupportsOpeningDocumentsInPlace: true
+        NSMotionUsageDescription: Records your iPhone's motion sensors for the activity you choose.
+        NSLocationWhenInUseUsageDescription: Keeps recording while your iPhone is locked, and records location if you turn it on.
+        NSHealthShareUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is read from Health.
+        NSHealthUpdateUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is saved to Health.
+    entitlements:
+      path: iOS/Example.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rahulislam.sensing.example
+        TARGETED_DEVICE_FAMILY: "1" # iPhone only: it rides in a pocket (a portrait-only iPad app is rejected)
+  ExampleWatch:
+    type: application
+    platform: watchOS
+    sources: [Watch, Shared]
+    dependencies:
+      - package: SensingSDK
+        product: SensingWatch
+    info:
+      path: Watch/Info.plist
+      properties:
+        CFBundleDisplayName: Sensing Example
+        CFBundleName: Sensing Example
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        WKApplication: true
+        ITSAppUsesNonExemptEncryption: false
+        WKCompanionAppBundleIdentifier: com.rahulislam.sensing.example
+        WKBackgroundModes: [workout-processing]
+        NSMotionUsageDescription: Records your watch's motion sensors for the activity you choose.
+        NSHealthShareUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is read from Health.
+        NSHealthUpdateUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is saved to Health.
+    entitlements:
+      path: Watch/ExampleWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rahulislam.sensing.example.watchkitapp

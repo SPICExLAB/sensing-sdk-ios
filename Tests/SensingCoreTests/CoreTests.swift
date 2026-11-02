@@ -44,3 +44,19 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(back, batch)
     }
 }
+
+final class ClockTests: XCTestCase {
+    func testMonoAndUptimeAdvanceTogetherWhileAwake() throws {
+        let m0 = Clock.monoNs(), u0 = Clock.uptimeNs(), o0 = Clock.sleepOffsetNs()
+        Thread.sleep(forTimeInterval: 0.05)
+        let m1 = Clock.monoNs(), u1 = Clock.uptimeNs(), o1 = Clock.sleepOffsetNs()
+        XCTAssertGreaterThan(m1 - m0, 40_000_000)
+        XCTAssertLessThan(abs((m1 - m0) - (u1 - u0)), 5_000_000, "both count while awake")
+        XCTAssertGreaterThanOrEqual(o0, 0)
+        XCTAssertLessThan(abs(o1 - o0), 5_000_000, "the offset only moves during sleep")
+    }
+
+    func testWallMsIsNow() {
+        XCTAssertLessThan(abs(Clock.wallMs() - Int64(Date().timeIntervalSince1970 * 1000)), 1000)
+    }
+}
