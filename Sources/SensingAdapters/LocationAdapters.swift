@@ -16,6 +16,7 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
     private var sink: SampleSink?
     private var clock: (any EngineClock)?
     private var decimator = Decimator(periodUs: 30_000_000)
+    private var gate = ForwardGate()
     private var available: Bool?
 
     public override init() {}
@@ -34,6 +35,7 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
             self.sink = sink
             self.clock = clock
             decimator = Decimator(periodUs: periodUs)
+            gate = ForwardGate(startNs: clock.monoNs())  // a cached fix from before this recording isn't part of it
             available = nil
         }
         sink.event("listening", ["interval_ms": String(periodUs / 1000), "provider_enabled": CLLocationManager.locationServicesEnabled() ? "true" : "false"], tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs())
@@ -90,9 +92,11 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
             lock.withLock {
                 guard let sink, let clock else { return }
                 let mono = clock.monoNs() - max(clock.wallMs() - wall, 0) * 1_000_000
+                guard gate.admit(tsNs: mono) else { return }
+                // At the fix's own time, since it's the fix that says so.
                 if available != true {
                     available = true
-                    sink.event("available", tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs())
+                    sink.event("available", tsMonoNs: mono, tsWallMs: wall)
                 }
                 guard decimator.take(tsNs: mono) else { return }
                 sink.message(.location(payload), tsMonoNs: mono, tsWallMs: wall, accuracy: .high)
@@ -104,7 +108,9 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
         lock.withLock {
             guard let sink, let clock, available != false else { return }
             available = false
-            sink.event("unavailable", ["reason": String((error as NSError).code)], tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs())
+            let mono = clock.monoNs()
+            gate.note(tsNs: mono)
+            sink.event("unavailable", ["reason": String((error as NSError).code)], tsMonoNs: mono, tsWallMs: clock.wallMs())
         }
     }
 }
@@ -117,6 +123,7 @@ public final class ActivityAdapter: SensorAdapter, @unchecked Sendable {
     private let queue = OperationQueue()
     private let lock = NSLock()
     private var transitions = ActivityTransitions()
+    private var gate = ForwardGate()
     private var sink: SampleSink?
     private var clock: (any EngineClock)?
     private var tracker: SleepOffsetTracker?
@@ -139,6 +146,7 @@ public final class ActivityAdapter: SensorAdapter, @unchecked Sendable {
             self.sink = sink
             self.clock = clock
             transitions = ActivityTransitions()
+            gate = ForwardGate()
             tracker = SleepOffsetTracker(uptimeNs: clock.uptimeNs(), offsetNs: clock.monoNs() - clock.uptimeNs())
             lastDate = Date()
         }
@@ -181,6 +189,7 @@ public final class ActivityAdapter: SensorAdapter, @unchecked Sendable {
             tracker.observe(uptimeNs: clock.uptimeNs(), offsetNs: clock.monoNs() - clock.uptimeNs())
             let mono = tracker.monoNs(forTimestamp: a.timestamp)
             let wall = Conversions.wallMs(forMonoNs: mono, clock: clock)
+            guard gate.admit(tsNs: mono) else { return }
             for t in transitions.observe(flags) {
                 sink.event("transition", ["activity": t.activity, "transition": t.transition, "confidence": confidence], tsMonoNs: mono, tsWallMs: wall)
             }

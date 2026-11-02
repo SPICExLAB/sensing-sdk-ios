@@ -183,6 +183,7 @@ public final class PedometerAdapter: SensorAdapter, @unchecked Sendable {
     private var sink: SampleSink?
     private var clock: (any EngineClock)?
     private var startDate: Date?
+    private var gate = ForwardGate()
 
     public init() {}
 
@@ -199,6 +200,7 @@ public final class PedometerAdapter: SensorAdapter, @unchecked Sendable {
             self.sink = sink
             self.clock = clock
             startDate = start
+            gate = ForwardGate(startNs: clock.monoNs())
         }
         sink.scalar(0, tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs(), accuracy: .high)
         pedometer.startUpdates(from: start) { [weak self] data, _ in
@@ -229,7 +231,9 @@ public final class PedometerAdapter: SensorAdapter, @unchecked Sendable {
             guard let sink, let clock else { return }
             // CMPedometerData's dates are wall time, so its age on the wall clock gives the mono time.
             let ageMs = max(0, clock.wallMs() - Int64(end.timeIntervalSince1970 * 1000))
-            sink.scalar(count.floatValue, tsMonoNs: clock.monoNs() - ageMs * 1_000_000, tsWallMs: clock.wallMs() - ageMs, accuracy: .high)
+            let mono = clock.monoNs() - ageMs * 1_000_000
+            guard gate.admit(tsNs: mono) else { return }
+            sink.scalar(count.floatValue, tsMonoNs: mono, tsWallMs: clock.wallMs() - ageMs, accuracy: .high)
         }
     }
 }

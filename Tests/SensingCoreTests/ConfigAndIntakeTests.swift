@@ -478,3 +478,28 @@ final class DeviceMappingTests: XCTestCase {
         }
     }
 }
+
+final class ForwardGateTests: XCTestCase {
+    func testOnlyForward() {
+        var g = ForwardGate()
+        XCTAssertTrue(g.admit(tsNs: 100))
+        XCTAssertTrue(g.admit(tsNs: 100), "the same time is fine")
+        XCTAssertFalse(g.admit(tsNs: 99))
+        XCTAssertTrue(g.admit(tsNs: 101))
+    }
+
+    func testAReadingFromBeforeTheStartIsOut() {
+        var g = ForwardGate(startNs: 1000)
+        XCTAssertFalse(g.admit(tsNs: 999), "a cached fix")
+        XCTAssertTrue(g.admit(tsNs: 1000))
+    }
+
+    func testAnEventMovesItOn() {
+        var g = ForwardGate()
+        XCTAssertTrue(g.admit(tsNs: 100))
+        g.note(tsNs: 200)
+        XCTAssertFalse(g.admit(tsNs: 150))
+        g.note(tsNs: 120)
+        XCTAssertTrue(g.admit(tsNs: 200), "an older note doesn't move it back")
+    }
+}

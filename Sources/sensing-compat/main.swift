@@ -149,6 +149,46 @@ func runWriter(_ path: URL) async throws {
     while true { try await Task.sleep(for: .seconds(60)) }
 }
 
+/// A whole recording through the real controller and exporter, for the JVM and Go to judge what the app actually hands over.
+final class ExportAdapter: SensorAdapter, @unchecked Sendable {
+    let sensors = [SensingCatalog.accelerometer]
+    private let lock = NSLock()
+    private var sink: SampleSink?
+    func availability(of sensor: SensorID) -> Availability { .available }
+    func start(_ settings: [SensorID: SensorSetting], sinks: [SensorID: SampleSink], clock: any EngineClock) { lock.withLock { sink = sinks[SensingCatalog.accelerometer] } }
+    func stop() { lock.withLock { sink = nil } }
+    func push(_ n: Int64, clock: any EngineClock) {
+        let s = lock.withLock { sink }
+        for i in 0..<n { s?.vec3(Float(i), -9.8, 0.25, tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs(), accuracy: .high) }
+    }
+}
+
+@MainActor
+func runExport(_ path: URL) async throws {
+    let root = try StorageRoot(parent: path.appendingPathComponent("device"))
+    let adapter = ExportAdapter()
+    let clock = SystemClock()
+    var options = CollectionEngine.Options()
+    options.freeBytes = { 1 << 40 }
+    let controller = RecordingController(root: root, deviceId: device, catalog: SensingCatalog.phone, adapters: [adapter],
+                                         device: DeviceDescription(platform: "ios", model: "compat", os: "compat", appVersion: "1", sdkVersion: SDK.version), options: options)
+    let spec = RecordingSpec(id: activity, label: "Walking", startAttrs: ["config_id": "free/locomotion/walking", "config_version": "1", "module": "free", "taxonomy_version": "2"],
+                             labelAttrs: ["label_id": "22222222-2222-4222-8222-222222222222", "kind": "interval", "taxonomy_id": "locomotion/walking", "taxonomy_version": "2", "source": "tap", "confidence": "1"])
+    try await controller.start(spec)
+    adapter.push(500, clock: clock)
+    await controller.stop(answers: ["where": "outdoors"])
+    let zip = try await controller.export(id: spec.id, to: path)
+    let unzip = Process()
+    unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+    unzip.arguments = ["-q", zip.path, "-d", path.appendingPathComponent("unzipped").path]
+    try unzip.run()
+    unzip.waitUntilExit()
+    guard unzip.terminationStatus == 0 else { throw CocoaError(.fileReadCorruptFile) }
+    let lines = try canonicalLines(under: path.appendingPathComponent("unzipped"))
+    try (lines.joined(separator: "\n") + "\n").write(to: path.appendingPathComponent("unzipped/expected.txt"), atomically: true, encoding: .utf8)
+    print("exported \(chunkFiles(under: path.appendingPathComponent("unzipped")).count) chunks, \(lines.count) samples")
+}
+
 func chunkFiles(under path: URL) -> [URL] {
     guard let walker = FileManager.default.enumerator(at: path, includingPropertiesForKeys: nil) else { return [] }
     return walker.compactMap { $0 as? URL }.filter { $0.lastPathComponent.hasSuffix(ChunkWriter.finalSuffix) }.sorted { $0.path < $1.path }
@@ -160,7 +200,7 @@ func canonicalLines(under path: URL) throws -> [String] {
 
 let arguments = CommandLine.arguments
 guard arguments.count == 3 else {
-    print("usage: sensing-compat write DIR | read PATH | writer DIR")
+    print("usage: sensing-compat write DIR | read PATH | writer DIR | export DIR")
     exit(2)
 }
 let path = URL(fileURLWithPath: arguments[2])
@@ -179,7 +219,9 @@ case "read":
     for line in try canonicalLines(under: path) { print(line) }
 case "writer":
     try await runWriter(path)
+case "export":
+    try await runExport(path)
 default:
-    print("usage: sensing-compat write DIR | read PATH | writer DIR")
+    print("usage: sensing-compat write DIR | read PATH | writer DIR | export DIR")
     exit(2)
 }

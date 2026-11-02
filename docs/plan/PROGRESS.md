@@ -95,3 +95,15 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 - ☑ What they compute is pure and tested on macOS: Android's `DeviceAdaptersTest` where it applies (the dBFS values, the `[n, 2]` tensor, the network attributes, salted 16-character hashes), plus battery attributes, invalid location values, one-activity-at-a-time transitions and the catalog's defaults
 - ☑ Sound and Bluetooth default to off (S-008). Location and activity default to on for the phone and off for the watch
 - ☐ **None of these adapters has run on a device.** Only their mappings are tested. Permission prompts for the mic and Bluetooth come with P7's Permissions screen; until then those two report `adapter_unavailable`. A11 (the rest), A12 and A13 are still to come
+
+## P7
+
+- ☑ `ZipWriter`, `RecordingExporter` and `ChunkInspector`: a store-only zip with `manifest.json` (`sensing-export/1`), under the ingest's landing paths. Real `unzip -t` checks it in tests
+- ☑ `scripts/compat.sh` now takes a whole recording through the real controller and exporter, and hands the zip to Android's and the ingest's real decoders: 521 samples identical in both, 4 label events became 2 session writes and 2 label writes, nothing skipped. This is A15 on made-up samples; A15 proper needs a real export
+- ☑ The example app: a searchable picker over the taxonomy's active ids, with labels in the lab app's attributes (`Activities.kt`); Permissions; Sensors, for each device; Recordings, with rates and gaps from the chunks, missing watch chunks, Export and Delete; Diagnostics, with storage and chunks no recording claims
+- ☑ Debug actions for the device tests: `-debugQuotaMiB` and `-deleteOldest` (A14), Crash now on the watch (A8), and `-recordAutostart`
+- ☑ `scripts/sync-taxonomy.sh`, and `Example/iOS/TAXONOMY_SOURCE.txt`, which says where the copy came from. `PrivacyInfo.xcprivacy` on both apps
+- ☑ A recording on a paired iPhone 18 Pro and Series 12 simulator (S-021), through the real app, 2026-11-02, 20 s. The watch app started from the phone's published state, recorded under the same recording id, and stopped with `phone_stop`. The phone wrote a real `peer_clock`. Location, network, screen and battery adapters ran without crashing, and `sensing-decode --check` was clean. Motion isn't available on a simulator, so it recorded `adapter_unavailable`, as it should
+- It found what the fake link couldn't: `loc.fused` going back in time when an event stamped now was followed by a fix with an older timestamp (now `ForwardGate`, also on activity and steps, and a cached fix from before the recording is dropped); the phone's Stop saving its own copy of the record over the watch's sessions, which an export needs; and a blank rate picker for sensors whose default isn't a listed rate. All fixed
+- ☐ **On a simulator, chunks never left the watch** (S-021), so file transfer through the SDK, acks and the summary are proven only against the fake. A9 and A10 are what will settle it
+- ☐ A7, A14 and A15 are still to come on real devices

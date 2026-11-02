@@ -91,3 +91,46 @@ final class DeviceIdentityTests: XCTestCase {
         XCTAssertNotEqual(try DeviceIdentity.load(root: other), id)
     }
 }
+
+final class ZipWriterTests: XCTestCase {
+    private func unzip(_ args: [String]) throws -> (Int32, String) {
+        let p = Process()
+        let out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        p.arguments = args
+        p.standardOutput = out
+        p.standardError = out
+        try p.run()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        return (p.terminationStatus, text)
+    }
+
+    func testRealUnzipReadsItBackByteForByte() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        // Bigger than the writer's buffer, and not all one value, so a bad CRC or offset would show.
+        var big = Data(count: 700_000)
+        for i in stride(from: 0, to: big.count, by: 97) { big[i] = UInt8(truncatingIfNeeded: i) }
+        let source = dir.appendingPathComponent("source.bin")
+        try big.write(to: source)
+        let empty = dir.appendingPathComponent("empty.bin")
+        try Data().write(to: empty)
+
+        let zipURL = dir.appendingPathComponent("out.zip")
+        let zip = try ZipWriter(to: zipURL)
+        try zip.add(file: source, path: "chunks/a/b/motion.accelerometer_0.pb.gz")
+        try zip.add(file: empty, path: "chunks/a/b/empty.pb.gz")
+        try zip.add(data: Data("{\"format\":1}".utf8), path: "manifest.json")
+        try zip.finish()
+
+        let (status, text) = try unzip(["-t", zipURL.path])
+        XCTAssertEqual(status, 0, text)
+        let out = dir.appendingPathComponent("out")
+        XCTAssertEqual(try unzip(["-q", zipURL.path, "-d", out.path]).0, 0)
+        XCTAssertEqual(try Data(contentsOf: out.appendingPathComponent("chunks/a/b/motion.accelerometer_0.pb.gz")), big)
+        XCTAssertEqual(try Data(contentsOf: out.appendingPathComponent("chunks/a/b/empty.pb.gz")), Data())
+        XCTAssertEqual(try String(contentsOf: out.appendingPathComponent("manifest.json"), encoding: .utf8), "{\"format\":1}")
+    }
+}

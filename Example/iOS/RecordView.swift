@@ -4,11 +4,10 @@ import SensingKit
 import SwiftUI
 import UIKit
 
-/// Phase 4's minimal recording screen, on the real SDK. The full app comes in Phase 7.
+/// The app's one piece of shared state: the SDK, what the person chose, and what the screens show.
 @MainActor
 @Observable
 final class RecordModel {
-    var motionHz: Int64 = 50
     private(set) var sensing: Sensing?
     private(set) var message = "" {
         didSet {
@@ -18,14 +17,23 @@ final class RecordModel {
         }
     }
     private(set) var recordings: [RecordingSummary] = []
+    var activity: TaxonomyNode?
+    let taxonomy = Taxonomy.load()
+    /// Motion rates in Hz, and which sensors are on, for each device. Saved between launches.
+    var phoneChoices = SensorChoices.load(key: "phone")
+    var watchChoices = SensorChoices.load(key: "watch")
 
     init() {
         do {
-            let s = try Sensing(options: {
-                var o = Sensing.Options()
-                o.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-                return o
-            }())
+            var options = Sensing.Options()
+            options.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+            #if DEBUG
+            // A14: `devicectl device process launch … -debugQuotaMiB 16 -deleteOldest YES`
+            let defaults = UserDefaults.standard
+            if defaults.integer(forKey: "debugQuotaMiB") > 0 { options.quotaBytes = Int64(defaults.integer(forKey: "debugQuotaMiB")) * 1024 * 1024 }
+            if defaults.bool(forKey: "deleteOldest") { options.retentionMode = .evictOldest }
+            #endif
+            let s = try Sensing(options: options)
             s.onEnded = { [weak self] summary in
                 self?.message = "Ended: \(summary.endReason ?? "")"
                 self?.reload()
@@ -41,11 +49,14 @@ final class RecordModel {
     }
 
     func start() {
-        guard let sensing else { return }
-        applyRate()
+        guard let sensing, let activity else { return }
+        phoneChoices.save(key: "phone")
+        watchChoices.save(key: "watch")
+        sensing.overrides = phoneChoices.overrides
+        sensing.watchOverrides = watchChoices.overrides
         Task {
             do {
-                try await sensing.start(RecordingSpec(label: "Test"))
+                try await sensing.start(Self.spec(activity: activity, taxonomyVersion: taxonomy.version))
                 message = "Recording. Lock the phone whenever you like."
             } catch {
                 message = String(describing: error)
@@ -62,110 +73,155 @@ final class RecordModel {
         }
     }
 
+    func discard() {
+        guard let sensing else { return }
+        Task {
+            await sensing.discard()
+            message = "Discarded: its label is gone. The sensor data is kept."
+            reload()
+        }
+    }
+
     func reload() { recordings = sensing?.recordings() ?? [] }
 
+    /// The same attributes as the lab app's activities (`Activities.kt`), so that a recording here projects the same way.
+    static func spec(activity: TaxonomyNode, taxonomyVersion: Int64) -> RecordingSpec {
+        RecordingSpec(label: activity.name,
+                      startAttrs: ["config_id": "free/\(activity.id)", "config_version": "1", "module": "free", "taxonomy_version": String(taxonomyVersion)],
+                      labelAttrs: ["label_id": UUID().uuidString.lowercased(), "kind": "interval", "taxonomy_id": activity.id,
+                                   "taxonomy_version": String(taxonomyVersion), "source": "tap", "confidence": "1"])
+    }
+
     #if DEBUG
-    /// `devicectl device process launch … -recordAutostart YES -recordSeconds 60 -recordHz 100`
+    /// `devicectl device process launch … -- -recordAutostart YES -recordSeconds 60 -recordHz 100 -recordWatch NO`
     func runLaunchArguments() {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "recordAutostart") else { return }
         let hz = Int64(defaults.integer(forKey: "recordHz"))
-        if hz > 0 { motionHz = hz }
+        if hz > 0 { phoneChoices.setAllMotion(hz: hz) }
         if defaults.object(forKey: "recordWatch") != nil { sensing?.recordWatch = defaults.bool(forKey: "recordWatch") }
+        activity = activity ?? taxonomy.nodes.first { $0.id == "locomotion/walking" } ?? taxonomy.nodes.first
         let seconds = max(defaults.double(forKey: "recordSeconds"), 3)
         Task {
             // This runs before the scene is active, and keep-alive can only begin in the foreground.
             while UIApplication.shared.applicationState != .active { try? await Task.sleep(for: .milliseconds(100)) }
             start()
+            Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { print("record: link \(self?.sensing?.status.linkFacts ?? "")") }
+            }
             Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.stop() }
             }
         }
     }
     #endif
-
-    /// A3 needs everything at one rate.
-    private func applyRate() {
-        guard let sensing, motionHz != 50 else {
-            sensing?.overrides = [:]
-            return
-        }
-        let period = 1_000_000 / motionHz
-        let motion = [SensingCatalog.accelerometer, SensingCatalog.gyroscope, SensingCatalog.linearAcceleration, SensingCatalog.magnetometer, SensingCatalog.rotation, SensingCatalog.gravity]
-        sensing.overrides = Dictionary(uniqueKeysWithValues: motion.map { ($0, SensorOverride(samplingPeriodUs: period)) })
-    }
 }
 
 struct RecordView: View {
     let model: RecordModel
+    @State private var picking = false
+    @State private var confirmingDiscard = false
 
     var body: some View {
-        @Bindable var model = model
         NavigationStack {
             List {
-                Section {
-                    if let sensing = model.sensing {
-                        if sensing.status.recording != nil {
-                            Button("Stop", role: .destructive) { model.stop() }
-                            if let start = sensing.status.recording?.startWallMs {
-                                Text(Date(timeIntervalSince1970: Double(start) / 1000), style: .timer).monospacedDigit()
-                            }
-                        } else {
-                            Picker("Motion rate", selection: $model.motionHz) {
-                                Text("Defaults").tag(Int64(50))
-                                Text("All at 100 Hz").tag(Int64(100))
-                            }
-                            if sensing.status.watchInstalled {
-                                Toggle("Also record on the watch", isOn: Binding(get: { sensing.recordWatch }, set: { sensing.recordWatch = $0 }))
-                            }
-                            Button("Start") { model.start() }
-                            if !sensing.hasLocationPermission {
-                                Button("Allow location") { sensing.requestLocationPermission() }
-                            }
-                        }
-                        if !model.message.isEmpty { Text(model.message).font(.caption) }
-                        ForEach(sensing.status.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.red) }
-                    }
+                if let sensing = model.sensing {
+                    controls(sensing)
+                    let status = sensing.status
+                    if status.recording != nil { live(status) }
+                    if status.watchInstalled { watch(status) }
                 }
-                if let status = model.sensing?.status, status.recording != nil {
-                    Section("Live") {
-                        ForEach(status.streams.keys.sorted(), id: \.self) { name in
-                            let s = status.streams[name]!
-                            LabeledContent(name, value: "\(s.hz.formatted(.number.precision(.fractionLength(1)))) Hz · \(s.count)").font(.caption)
-                        }
-                        LabeledContent("Waiting / dropped", value: "\(status.pending) / \(status.dropped)").font(.caption)
-                    }
+                if !model.message.isEmpty { Section { Text(model.message).font(.caption) } }
+            }
+            .navigationTitle("Record")
+            .sheet(isPresented: $picking) {
+                TaxonomyPicker(taxonomy: model.taxonomy) { node in
+                    model.activity = node
+                    picking = false
                 }
-                if let status = model.sensing?.status, status.watchInstalled {
-                    Section("Watch") {
-                        LabeledContent("Link", value: status.peer.reachable ? "Reachable" : "Not reachable").font(.caption)
-                        LabeledContent("Chunks received", value: String(status.peer.received)).font(.caption)
-                        if status.peer.refused > 0 { LabeledContent("Chunks refused", value: String(status.peer.refused)).font(.caption).foregroundStyle(.red) }
-                        if let peer = status.peer.status, peer.recordingId != nil, status.recording != nil {
-                            ForEach(peer.hz.keys.sorted().filter { $0.hasPrefix("motion.") || $0.hasPrefix("env.") }, id: \.self) { name in
-                                LabeledContent(name, value: "\(peer.hz[name]!.formatted(.number.precision(.fractionLength(1)))) Hz").font(.caption)
-                            }
-                            LabeledContent("Waiting to send / dropped", value: "\(peer.chunksWaiting) / \(peer.dropped)").font(.caption)
-                            if let pct = peer.batteryPct { LabeledContent("Battery", value: "\(pct)%").font(.caption) }
-                        }
+            }
+            #if DEBUG
+            .task { model.runLaunchArguments() }
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private func controls(_ sensing: Sensing) -> some View {
+        Section {
+            if let recording = sensing.status.recording {
+                LabeledContent("Activity", value: recording.label)
+                Text(Date(timeIntervalSince1970: Double(recording.startWallMs) / 1000), style: .timer).monospacedDigit().font(.largeTitle)
+                Button("Stop", role: .destructive) { model.stop() }
+                Button("Started by mistake: discard") { confirmingDiscard = true }
+                    .confirmationDialog("Discard this recording's label? The sensor data stays.", isPresented: $confirmingDiscard) {
+                        Button("Discard", role: .destructive) { model.discard() }
                     }
+            } else {
+                Button { picking = true } label: {
+                    LabeledContent("Activity", value: model.activity?.name ?? "Choose")
                 }
-                Section("Recordings") {
-                    ForEach(model.recordings) { r in
-                        VStack(alignment: .leading) {
-                            Text(r.label)
-                            Text("\(Date(timeIntervalSince1970: Double(r.startWallMs) / 1000).formatted()) · \(r.endReason ?? "open")").font(.caption)
-                            if let peer = r.peer {
-                                Text("Watch: \(peer.endReason), \(peer.chunkIds.count) chunks").font(.caption).foregroundStyle(.secondary)
+                if sensing.status.watchInstalled {
+                    Toggle("Also record on the watch", isOn: Binding(get: { sensing.recordWatch }, set: { sensing.recordWatch = $0 }))
+                }
+                Button("Start") { model.start() }.disabled(model.activity == nil)
+            }
+            ForEach(sensing.status.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.red) }
+        }
+    }
+
+    private func live(_ status: Sensing.Status) -> some View {
+        Section("This phone") {
+            ForEach(status.streams.keys.sorted().filter(Self.isData), id: \.self) { name in
+                let s = status.streams[name]!
+                LabeledContent(name, value: "\(s.hz.formatted(.number.precision(.fractionLength(1)))) Hz · \(s.count)").font(.caption)
+            }
+            LabeledContent("Waiting / dropped", value: "\(status.pending) / \(status.dropped)").font(.caption)
+        }
+    }
+
+    private func watch(_ status: Sensing.Status) -> some View {
+        Section("Watch") {
+            LabeledContent("Link", value: status.peer.reachable ? "Reachable" : "Not reachable").font(.caption)
+            LabeledContent("Chunks received", value: String(status.peer.received)).font(.caption)
+            if status.peer.refused > 0 { LabeledContent("Chunks refused", value: String(status.peer.refused)).font(.caption).foregroundStyle(.red) }
+            if let peer = status.peer.status, peer.recordingId != nil, status.recording != nil {
+                ForEach(peer.hz.keys.sorted().filter(Self.isData), id: \.self) { name in
+                    LabeledContent(name, value: "\(peer.hz[name]!.formatted(.number.precision(.fractionLength(1)))) Hz").font(.caption)
+                }
+                LabeledContent("Waiting to send / dropped", value: "\(peer.chunksWaiting) / \(peer.dropped)").font(.caption)
+                if let pct = peer.batteryPct { LabeledContent("Battery", value: "\(pct)%").font(.caption) }
+            }
+        }
+    }
+
+    private static func isData(_ name: String) -> Bool { name.hasPrefix("motion.") || name.hasPrefix("env.") || name.hasPrefix("loc.") || name == "device.audio_level" }
+}
+
+struct TaxonomyPicker: View {
+    let taxonomy: Taxonomy
+    let chosen: (TaxonomyNode) -> Void
+    @State private var search = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(taxonomy.roots(matching: search), id: \.root) { group in
+                    Section(group.root) {
+                        ForEach(group.nodes) { node in
+                            Button { chosen(node) } label: {
+                                VStack(alignment: .leading) {
+                                    Text(node.name)
+                                    Text(node.id).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
                 }
             }
-            .navigationTitle("Record")
-            #if DEBUG
-            .task { model.runLaunchArguments() }
-            #endif
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))
+            .navigationTitle("Activity")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

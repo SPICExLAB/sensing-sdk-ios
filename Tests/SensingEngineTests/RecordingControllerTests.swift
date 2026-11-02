@@ -238,3 +238,199 @@ final class RecordingControllerTests: XCTestCase {
         XCTAssertEqual(a["dropped"], "0")
     }
 }
+
+/// What happens to a recording after it's over.
+@MainActor
+final class FinishedRecordingTests: XCTestCase {
+    private let clock = FakeClock()
+    private let accel = SensingCatalog.accelerometer
+    private let device = DeviceDescription(platform: "ios", model: "iPhone16,1", os: "iOS 26.7.1", appVersion: "1", sdkVersion: "0.1")
+
+    private func controller(_ root: StorageRoot, adapter: FakeAdapter) -> RecordingController {
+        var o = CollectionEngine.Options()
+        o.manualTick = true
+        o.freeBytes = { 1 << 40 }
+        return RecordingController(root: root, deviceId: "dev-1", catalog: SensingCatalog.phone, adapters: [adapter], device: device, clock: clock, options: o)
+    }
+
+    private func record(_ c: RecordingController, _ adapter: FakeAdapter, id: String, samples: Int64 = 10) async throws {
+        try await c.start(RecordingSpec(id: id, label: "Walking", labelAttrs: ["label_id": "l-\(id)", "kind": "interval", "taxonomy_id": "locomotion/walking", "taxonomy_version": "2", "source": "tap", "confidence": "1"]))
+        for _ in 0..<samples {
+            clock.advance(ms: 20)
+            adapter.sinks[accel]?.vec3(1, 2, 3, tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs())
+        }
+        await c.stop()
+    }
+
+    private let a = "aaaaaaaa-1111-4111-8111-111111111111"
+    private let b = "bbbbbbbb-1111-4111-8111-111111111111"
+
+    func testAnExportHoldsTheRecordingAndItsManifestAndNothingElse() async throws {
+        let root = try tempRoot()
+        let adapter = FakeAdapter(accel)
+        let c = controller(root, adapter: adapter)
+        try await record(c, adapter, id: a, samples: 10)
+        try await record(c, adapter, id: b, samples: 3)
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: out) }
+
+        let zip = try await c.export(id: a, missingPeerChunks: ["missing/one_0"], to: out)
+        XCTAssertEqual(zip.pathExtension, "zip")
+        let unzipped = out.appendingPathComponent("unzipped")
+        try unzip(zip, to: unzipped)
+
+        // Read back through `unzip` and the real format, under the paths the ingest's landing layout uses.
+        let session = try XCTUnwrap(c.recordings.find(id: a)?.engineSessions.first)
+        let chunk = unzipped.appendingPathComponent("chunks/dev-1/\(session)/\(accel.value)_0\(ChunkWriter.finalSuffix)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: chunk.path))
+        let raw = try XCTUnwrap(FrameCodec.inflate(try XCTUnwrap(FrameCodec.readFrames(try Data(contentsOf: chunk)).first).payload))
+        XCTAssertEqual(try Sensorlog_V1_SampleBatch(serializedBytes: raw).samples.count, 10)
+        let walker = FileManager.default.enumerator(at: unzipped.appendingPathComponent("chunks/dev-1"), includingPropertiesForKeys: nil)
+        let sessions = Set((walker?.compactMap { $0 as? URL } ?? []).filter { $0.lastPathComponent.hasSuffix(ChunkWriter.finalSuffix) }.map { $0.deletingLastPathComponent().lastPathComponent })
+        XCTAssertEqual(sessions, [session], "the other recording stays out")
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(ExportManifest.self, from: Data(contentsOf: unzipped.appendingPathComponent("manifest.json")))
+        XCTAssertEqual(manifest.format, "sensing-export/1")
+        XCTAssertEqual(manifest.recording.id, a)
+        XCTAssertEqual(manifest.missingPeerChunks, ["missing/one_0"])
+        XCTAssertFalse(manifest.chunks.isEmpty)
+        for c in manifest.chunks {
+            let file = unzipped.appendingPathComponent(c.path)
+            XCTAssertEqual(try ChunkFiles.sha256(of: file), c.sha256, c.path)
+            XCTAssertEqual(ChunkFiles.size(of: file), c.bytes, c.path)
+        }
+    }
+
+    func testARecordingStillRunningCantBeExportedOrDeleted() async throws {
+        let root = try tempRoot()
+        let c = controller(root, adapter: FakeAdapter(accel))
+        try await c.start(RecordingSpec(id: a, label: "Walking"))
+        let out = FileManager.default.temporaryDirectory
+        do {
+            _ = try await c.export(id: a, to: out)
+            XCTFail("should refuse")
+        } catch {
+            XCTAssertEqual(error as? RecordingController.ControllerError, .stillRecording)
+        }
+        do {
+            try await c.delete(id: a)
+            XCTFail("should refuse")
+        } catch {
+            XCTAssertEqual(error as? RecordingController.ControllerError, .stillRecording)
+        }
+        await c.stop()
+    }
+
+    func testDeletingARecordingRemovesItsChunksAndNoOthers() async throws {
+        let root = try tempRoot()
+        let adapter = FakeAdapter(accel)
+        let c = controller(root, adapter: adapter)
+        try await record(c, adapter, id: a)
+        try await record(c, adapter, id: b, samples: 3)
+        try await c.delete(id: a)
+        XCTAssertNil(c.recordings.find(id: a))
+        XCTAssertNotNil(c.recordings.find(id: b))
+        XCTAssertEqual(try samples(in: root).stream(accel.value).count, 3)
+        let left = await c.engine.chunks()
+        XCTAssertTrue(left.allSatisfy { c.recordings.find(id: b)!.engineSessions.contains($0.sessionId) })
+        do {
+            try await c.delete(id: a)
+            XCTFail("it's gone")
+        } catch {
+            XCTAssertEqual(error as? RecordingController.ControllerError, .notFound)
+        }
+    }
+
+    func testAnExportOfACrashedRecordingHasItsClosingEvents() async throws {
+        let root = try tempRoot()
+        let adapter = FakeAdapter(accel)
+        let dead = controller(root, adapter: adapter)
+        try await dead.start(RecordingSpec(id: a, label: "Walking", labelAttrs: ["label_id": "l", "kind": "interval", "taxonomy_id": "locomotion/walking", "taxonomy_version": "2", "source": "tap", "confidence": "1"]))
+        clock.advance(ms: 20)
+        adapter.sinks[accel]?.vec3(1, 2, 3, tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs())
+        await dead.engine.tick()
+        clock.advance(ms: 2000)
+        await dead.engine.tick()
+        clock.advance(ms: 60_000)
+
+        let next = controller(root, adapter: FakeAdapter(accel))
+        await next.recover()
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: out) }
+        let zip = try await next.export(id: a, to: out)
+        let unzipped = out.appendingPathComponent("unzipped")
+        try unzip(zip, to: unzipped)
+        let root2 = try StorageRoot(parent: out.appendingPathComponent("r"))
+        try FileManager.default.createDirectory(at: root2.chunks, withIntermediateDirectories: true)
+        try FileManager.default.removeItem(at: root2.chunks)
+        try FileManager.default.copyItem(at: unzipped.appendingPathComponent("chunks"), to: root2.chunks)
+        let all = try samples(in: root2)
+        XCTAssertEqual(all.events("device.gap", "process_death").count, 1)
+        XCTAssertEqual(all.events("label.session", "session_end").first?.event.attributes["end_reason"], "process_died")
+        XCTAssertEqual(all.stream(accel.value).count, 1)
+        XCTAssertEqual(next.recordings.find(id: a)?.endReason, "process_died")
+    }
+
+    func testChunksNoRecordingClaimsCanBeCleared() async throws {
+        let root = try tempRoot()
+        let adapter = FakeAdapter(accel)
+        let c = controller(root, adapter: adapter)
+        try await record(c, adapter, id: a)
+        let none = await c.orphanChunks()
+        XCTAssertTrue(none.isEmpty)
+        // A recording deleted while a watch chunk was still on its way.
+        let chunk = ChunkRecord(chunkId: "cccccccc-1111-4111-8111-111111111111/motion.accelerometer_0", sessionId: "cccccccc-1111-4111-8111-111111111111", sensorId: accel.value, firstSeq: 0, lastSeq: 0,
+                                firstTsMono: 0, lastTsMono: 0, firstWallMs: 0, lastWallMs: 0, bytes: 0, sha256: "", frames: 0, deviceId: "w")
+        await c.engine.adopt(chunk)
+        let orphans = await c.orphanChunks()
+        XCTAssertEqual(orphans.map(\.chunkId), [chunk.chunkId])
+        await c.deleteOrphanChunks()
+        let after = await c.orphanChunks()
+        XCTAssertTrue(after.isEmpty)
+        XCTAssertNotNil(c.recordings.find(id: a), "and the claimed ones stay")
+        XCTAssertEqual(try samples(in: root).stream(accel.value).count, 10)
+    }
+
+    func testAnExtraLabelGoesIntoTheStream() async throws {
+        let root = try tempRoot()
+        let c = controller(root, adapter: FakeAdapter(accel))
+        try await c.start(RecordingSpec(id: a, label: "Walking"))
+        await c.upsertLabel(["label_id": "e1", "kind": "event", "taxonomy_id": "daily/eating", "taxonomy_version": "2", "source": "tap", "confidence": "1"])
+        await c.stop()
+        let extra = try samples(in: root).events("label.session", "label_upsert").first { $0.event.attributes["label_id"] == "e1" }
+        XCTAssertEqual(extra?.event.attributes["session_id"], a)
+        XCTAssertEqual(extra?.event.attributes["kind"], "event")
+    }
+
+    func testTheInspectorReportsRatesFromTheChunksThemselves() async throws {
+        let root = try tempRoot()
+        let adapter = FakeAdapter(accel)
+        let c = controller(root, adapter: adapter)
+        try await record(c, adapter, id: a, samples: 51)
+        let streams = await c.inspect(id: a)
+        let stream = try XCTUnwrap(streams.first { $0.sensorId == accel.value })
+        XCTAssertEqual(stream.stats.samples, 51)
+        XCTAssertEqual(stream.stats.rateHz, 50, accuracy: 0.01)
+        XCTAssertEqual(stream.stats.gaps, 0)
+        XCTAssertEqual(stream.stats.missingSeq, 0)
+        XCTAssertEqual(stream.deviceId, "dev-1")
+    }
+
+    private func unzip(_ zip: URL, to directory: URL) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        p.arguments = ["-tq", zip.path]
+        p.standardOutput = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        XCTAssertEqual(p.terminationStatus, 0, "unzip's own integrity check, CRCs included")
+        let extract = Process()
+        extract.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        extract.arguments = ["-q", zip.path, "-d", directory.path]
+        try extract.run()
+        extract.waitUntilExit()
+        XCTAssertEqual(extract.terminationStatus, 0)
+    }
+}

@@ -143,6 +143,7 @@ final class FakeTransport: LinkTransport, @unchecked Sendable {
     var isCounterpartInstalled: Bool { installed }
     var receivedContext: Data? { lock.withLock { context } }
     var outstandingTransfers: Set<String> { lock.withLock { outstanding } }
+    var facts: String { "fake" }
 
     private func whenUp(_ work: @escaping @Sendable () -> Void) {
         let now = lock.withLock { () -> Bool in

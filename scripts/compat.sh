@@ -43,6 +43,21 @@ if out=$(cd "$INGEST" && COMPAT_READ="$TMP/swift" COMPAT_OUT="$TMP/go.txt" go te
   else fail "content differs"; diff "$TMP/swift/expected.txt" "$TMP/go.txt" | head -10; fi
 else fail "$(echo "$out" | tail -15)"; fi
 
+step "A whole recording is exported to a zip"
+if out=$(swift run -q sensing-compat export "$TMP/export" 2>&1); then pass "$out"; else fail "$out"; fi
+
+step "JVM reads the export"
+if gradle_run "read $TMP/export/unzipped" > "$TMP/jvm-export.txt"; then
+  if diff -q "$TMP/export/unzipped/expected.txt" "$TMP/jvm-export.txt" >/dev/null; then pass "$(wc -l < "$TMP/jvm-export.txt" | tr -d ' ') samples identical"
+  else fail "content differs"; diff "$TMP/export/unzipped/expected.txt" "$TMP/jvm-export.txt" | head -10; fi
+else fail "$(tail -15 "$TMP/gradle.err")"; fi
+
+step "Go reads the export, labels included"
+if out=$(cd "$INGEST" && COMPAT_READ="$TMP/export/unzipped" COMPAT_OUT="$TMP/go-export.txt" go test -overlay "$TMP/overlay.json" -count=1 -v -run '^TestCompatRead' ./internal/server 2>&1); then
+  if diff -q "$TMP/export/unzipped/expected.txt" "$TMP/go-export.txt" >/dev/null; then pass "$(echo "$out" | grep -oE '[0-9]+ chunks.*writes' | tail -1)"
+  else fail "content differs"; diff "$TMP/export/unzipped/expected.txt" "$TMP/go-export.txt" | head -10; fi
+else fail "$(echo "$out" | tail -15)"; fi
+
 if [ "${1:-}" = "--regen-fixtures" ]; then
   step "JVM writes Tests/Fixtures/android"
   rm -rf Tests/Fixtures/android

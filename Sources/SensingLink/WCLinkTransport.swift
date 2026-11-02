@@ -36,6 +36,15 @@ public final class WCLinkTransport: NSObject, LinkTransport, WCSessionDelegate, 
 
     public var receivedContext: Data? { session.receivedApplicationContext[Self.payload] as? Data }
 
+    public var facts: String {
+        guard WCSession.isSupported() else { return "not supported" }
+        #if os(iOS)
+        return "state \(session.activationState.rawValue), paired \(session.isPaired), watch app \(session.isWatchAppInstalled), reachable \(session.isReachable)"
+        #else
+        return "state \(session.activationState.rawValue), phone app \(session.isCompanionAppInstalled), reachable \(session.isReachable)"
+        #endif
+    }
+
     public func publish(context: Data) throws {
         try session.updateApplicationContext([Self.payload: context])
     }

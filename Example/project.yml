@@ -15,7 +15,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "4" # raise it for every build you install: watchOS only updates the watch app to a higher build
+    CURRENT_PROJECT_VERSION: "5" # raise it for every build you install: watchOS only updates the watch app to a higher build
 targets:
   Example:
     type: application

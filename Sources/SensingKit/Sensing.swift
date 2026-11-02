@@ -10,6 +10,16 @@ import UIKit
 
 /// The iPhone's public API. Recording runs from Start to Stop, with the screen locked: a location session keeps the app
 /// alive (S-014), so CoreMotion keeps delivering. Force-quit ends it; the next launch recovers the files and records the gap.
+public struct RecordingDetails: Sendable, Equatable {
+    public var recording: RecordingSummary
+    public var bytes: Int64
+    public var chunks: Int64
+    public var missingWatchChunks: [String]
+    /// This phone's device id, to tell its streams from the watch's.
+    public var deviceId: String
+    public var streams: [ChunkInspector.Stream]
+}
+
 @MainActor
 @Observable
 public final class Sensing {
@@ -17,6 +27,8 @@ public final class Sensing {
         public var keepAlive: KeepAliveMode = .location100m
         public var appVersion = ""
         public var retentionMode = RetentionMode.stopWhenFull
+        /// Replaces the quota's usual rule, 10% of free space up to 2 GiB. For tests.
+        public var quotaBytes: Int64?
 
         public init() {}
     }
@@ -42,6 +54,8 @@ public final class Sensing {
         public var warnings: [String] = []
         public var peer = PhoneLink.PeerState()
         public var watchInstalled = false
+        /// What WatchConnectivity says, for when the watch won't start.
+        public var linkFacts = ""
     }
 
     public private(set) var status = Status()
@@ -78,6 +92,7 @@ public final class Sensing {
         var engine = CollectionEngine.Options()
         engine.deviceKind = .phone
         engine.retentionMode = options.retentionMode
+        if let quota = options.quotaBytes { engine.policy = RetentionPolicy(hardCapBytes: quota, freeFraction: 1, minQuotaBytes: 0) }
         let battery = BatterySnapshot()
         self.battery = battery
         engine.heartbeatExtras = { @Sendable in battery.attributes() }
@@ -151,6 +166,7 @@ public final class Sensing {
         startWatching()
         peerWarning = nil
         // The phone never waits for the watch: it's recording already.
+        await link.waitUntilActive()
         if recordWatch, link.transport.isCounterpartInstalled {
             link.publish(recording: PeerRecording(id: spec.id, label: spec.label, startWallMs: summary.startWallMs, maxDurationMs: spec.maxDurationMs, overrides: watchOverrides))
             startWatch()
@@ -176,6 +192,61 @@ public final class Sensing {
     }
 
     public func recordings() -> [RecordingSummary] { controller.recordings.all() }
+
+    /// Everything known about a finished recording. It decodes every chunk, so it can take a moment.
+    public func details(of id: String) async -> RecordingDetails? {
+        guard let recording = controller.recordings.find(id: id) else { return nil }
+        let chunks = await controller.chunks(of: recording)
+        let missing = await link.missingPeerChunks(recordingId: id)
+        return RecordingDetails(recording: recording, bytes: chunks.reduce(0) { $0 + $1.bytes }, chunks: Int64(chunks.count), missingWatchChunks: missing,
+                                deviceId: controller.deviceId, streams: await controller.inspect(id: id))
+    }
+
+    /// Writes the recording to a zip in the temporary directory, ready to share. Whatever hasn't arrived from the watch yet is
+    /// listed in its manifest. Delete it once it's shared: it holds a copy of someone's data.
+    public func export(id: String) async throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("exports", isDirectory: true)
+        return try await controller.export(id: id, missingPeerChunks: await link.missingPeerChunks(recordingId: id), to: directory)
+    }
+
+    /// Deletes a recording and its chunks from this phone. This can't be undone. A watch chunk still on its way shows up in
+    /// `orphanChunks`.
+    public func delete(id: String) async throws {
+        try await controller.delete(id: id)
+        refresh()
+    }
+
+    /// A label of its own during a recording, such as an event someone marked. The attributes are Android's.
+    public func upsertLabel(_ attributes: [String: String]) async { await controller.upsertLabel(attributes) }
+
+    public func orphanChunks() async -> [ChunkRecord] { await controller.orphanChunks() }
+
+    public func deleteOrphanChunks() async {
+        await controller.deleteOrphanChunks()
+        refresh()
+    }
+
+    public func storageStatus() async -> ChunkStore.Status { await controller.engine.storageStatus() }
+
+    // MARK: - Permissions
+
+    /// Goes up when a permission's answer arrives. Read it in a view to redraw then.
+    public private(set) var permissionAnswers: Int64 = 0
+
+    public func state(of permission: SensingPermission) -> PermissionState {
+        Permissions.state(of: permission, location: keepAliveController.locationAuthorization)
+    }
+
+    public func request(_ permission: SensingPermission) async {
+        switch permission {
+        case .motion: await Permissions.requestMotion()
+        case .location: keepAliveController.requestLocationPermission()  // answers through `location_authorization`
+        case .workouts: try? await keepAliveController.requestWorkoutPermission()
+        case .microphone: await Permissions.requestMicrophone()
+        case .bluetooth: await Permissions.requestBluetooth()
+        }
+        permissionAnswers += 1
+    }
 
     /// Chunks the watch said it recorded that haven't arrived.
     public func missingWatchChunks(recordingId: String) async -> [String] { await link.missingPeerChunks(recordingId: recordingId) }
@@ -237,6 +308,7 @@ public final class Sensing {
             var s = Status(recording: controller.current, streams: stats.streams, pending: stats.pending, dropped: stats.dropped, storageFraction: stats.storage.fraction)
             s.peer = link.peer
             s.watchInstalled = link.transport.isCounterpartInstalled
+            s.linkFacts = link.transport.facts
             if s.storageFraction >= 0.8 { s.warnings.append("Storage is \(Int64(s.storageFraction * 100))% full. Export and delete recordings; recording stops at 100%.") }
             if let peerWarning, s.recording != nil { s.warnings.append(peerWarning) }
             if status != s { status = s }
@@ -246,6 +318,7 @@ public final class Sensing {
     /// Losing location permission mid-recording means the app is about to be suspended, so it stops cleanly while it can.
     private func keepAliveEvent(_ kind: String, _ detail: String) {
         let engine = controller.engine
+        if kind == "location_authorization" { permissionAnswers += 1 }
         guard controller.state == .recording else { return }
         Task { await engine.emit(SensorIDs.health, kind, ["detail": detail]) }
         guard kind == "location_authorization", keepAlive != .none, keepAlive != .workout, !hasLocationPermission else { return }

@@ -315,6 +315,18 @@ final class LinkFlowTests: XCTestCase {
         XCTAssertTrue(try samples(in: r.phoneRoot).events("device.clock", "peer_clock").isEmpty)
     }
 
+    func testTheWatchsSessionsSurviveThePhonesStop() async throws {
+        let r = try await rig()
+        let id = "aaaaaaaa-1111-4111-8111-111111111111"
+        try await r.phone.start(RecordingSpec(id: id, label: "Walking"))
+        r.phoneLink.publish(recording: r.recording(id))
+        await until("the watch's session to be noted") { r.phone.recordings.find(id: id)?.peerEngineSessions?.isEmpty == false }
+        // Found on a simulator pair: the phone's Stop saved its own copy of the record over this.
+        await r.phone.stop()
+        XCTAssertEqual(r.phone.recordings.find(id: id)?.endReason, "user_stop")
+        XCTAssertEqual(r.phone.recordings.find(id: id)?.peerEngineSessions?.count, 1, "an export finds the watch's chunks through these")
+    }
+
     func testStatusReachesThePhone() async throws {
         let r = try await rig()
         r.phoneLink.publish(recording: r.recording())

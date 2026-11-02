@@ -131,6 +131,8 @@ public final class RecordingController {
 
     public enum ControllerError: Error, Equatable {
         case alreadyRecording
+        case stillRecording
+        case notFound
     }
 
     public private(set) var state = State.stopped
@@ -140,6 +142,7 @@ public final class RecordingController {
     public var onEnded: ((RecordingSummary) -> Void)?
 
     public let engine: CollectionEngine
+    public let deviceId: String
     public let sessions: ActivitySessions
     public let recordings: RecordingStore
 
@@ -152,6 +155,7 @@ public final class RecordingController {
     public init(root: StorageRoot, deviceId: String, catalog: [CatalogEntry], adapters: [any SensorAdapter], device: DeviceDescription,
                 clock: any EngineClock = SystemClock(), options: CollectionEngine.Options = CollectionEngine.Options()) {
         self.clock = clock
+        self.deviceId = deviceId
         self.catalog = catalog
         self.adapters = adapters
         self.device = device
@@ -184,6 +188,15 @@ public final class RecordingController {
         try await commands.run { [self] in try await startNow(spec, mirroredStartWallMs: mirroredStartWallMs) }
     }
 
+    /// A label beyond the recording's own, such as an event someone marked partway through. It needs `session_id`'s recording
+    /// to be running here. The attributes are Android's: `label_id`, `kind`, `taxonomy_id` and so on.
+    public func upsertLabel(_ attributes: [String: String]) async {
+        try? await commands.run { [self] in
+            guard sessions.upsertLabel(attributes) else { return }
+            await flushLabels()
+        }
+    }
+
     public func stop(answers: [String: String] = [:], reason: String = "user_stop") async {
         try? await commands.run { [self] in await stopNow(answers: answers, reason: reason, discard: false) }
     }
@@ -202,6 +215,63 @@ public final class RecordingController {
                 return
             }
             await flushLabels()
+        }
+    }
+
+    // MARK: - Finished recordings
+
+    /// Every chunk here that belongs to a recording, this device's and the watch's.
+    public func chunks(of recording: RecordingSummary) async -> [ChunkRecord] {
+        let sessions = Set(recording.engineSessions + (recording.peerEngineSessions ?? []) + (recording.peer?.engineSessions ?? []))
+        return await engine.chunks().filter { sessions.contains($0.sessionId) }
+    }
+
+    /// Chunks that no recording claims, such as a watch chunk that arrived after its recording was deleted. Nothing else would
+    /// ever free their space.
+    public func orphanChunks() async -> [ChunkRecord] {
+        var claimed: Set<String> = []
+        for r in recordings.all() { claimed.formUnion(r.engineSessions + (r.peerEngineSessions ?? []) + (r.peer?.engineSessions ?? [])) }
+        let active = await engine.stats().sessionId
+        return await engine.chunks().filter { !claimed.contains($0.sessionId) && $0.sessionId != active }
+    }
+
+    public func deleteOrphanChunks() async {
+        for chunk in await orphanChunks() { await engine.delete(chunk) }
+    }
+
+    /// Writes the recording to a zip in `directory`, and returns where.
+    public func export(id: String, missingPeerChunks: [String] = [], to directory: URL) async throws -> URL {
+        guard current?.id != id else { throw ControllerError.stillRecording }
+        guard let recording = recordings.find(id: id) else { throw ControllerError.notFound }
+        var files: [(record: ChunkRecord, file: URL)] = []
+        for chunk in await chunks(of: recording) { files.append((chunk, await engine.fileURL(for: chunk))) }
+        let snapshot = files
+        let url = directory.appendingPathComponent("sensing-\(id).zip")
+        let now = clock.wallMs()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Off the main actor, and out of the engine: a big export mustn't hold up either.
+        try await Task.detached(priority: .utility) {
+            try RecordingExporter.write(recording: recording, chunks: snapshot, missingPeerChunks: missingPeerChunks, createdWallMs: now, to: url)
+        }.value
+        return url
+    }
+
+    /// Rates and gaps per stream, from the chunks themselves.
+    public func inspect(id: String) async -> [ChunkInspector.Stream] {
+        guard let recording = recordings.find(id: id) else { return [] }
+        var files: [(record: ChunkRecord, file: URL)] = []
+        for chunk in await chunks(of: recording) { files.append((chunk, await engine.fileURL(for: chunk))) }
+        let snapshot = files
+        return await Task.detached(priority: .utility) { ChunkInspector.streams(snapshot) }.value
+    }
+
+    /// Deletes the recording and its chunks from this device. This can't be undone.
+    public func delete(id: String) async throws {
+        try await commands.run { [self] in
+            guard current?.id != id else { throw ControllerError.stillRecording }
+            guard let recording = recordings.find(id: id) else { throw ControllerError.notFound }
+            for chunk in await chunks(of: recording) { await engine.delete(chunk) }
+            recordings.delete(id: id)
         }
     }
 
@@ -240,7 +310,13 @@ public final class RecordingController {
         await engine.stop(reason: reason)
         sessions.chunksSealed()
         state = .stopped
-        guard var summary = current else { return }
+        closeCurrent(reason: reason)
+    }
+
+    /// Starts from what's on disk, not `current`: the link adds the watch's sessions to the same record while it runs.
+    private func closeCurrent(reason: String) {
+        guard let running = current else { return }
+        var summary = recordings.find(id: running.id) ?? running
         summary.endWallMs = clock.wallMs()
         summary.endReason = reason
         try? recordings.save(summary)
@@ -259,12 +335,7 @@ public final class RecordingController {
             // The engine has already stopped and sealed. Labels written from here wait in the outbox for the next session.
             sessions.stop()
             state = .stopped
-            guard var summary = current else { return }
-            summary.endWallMs = clock.wallMs()
-            summary.endReason = reason
-            try? recordings.save(summary)
-            current = nil
-            onEnded?(summary)
+            closeCurrent(reason: reason)
         }
     }
 
@@ -291,7 +362,7 @@ public final class RecordingController {
         guard dead != nil || sessions.pendingEvents > 0 else { return }
         var attrs = device.attributes
         if let dead { attrs["activity_session_id"] = dead.id }
-        await engine.start(CollectionConfig(sensors: [:]), adapters: [], reason: "recovery", attrs: attrs)
+        let recoverySession = await engine.start(CollectionConfig(sensors: [:]), adapters: [], reason: "recovery", attrs: attrs)
         if let dead {
             await engine.emit(SensorIDs.gap, "process_death", ["recording_id": dead.id, "from_wall_ms": String(lastWall(dead, await engine.chunks())), "to_wall_ms": String(clock.wallMs())])
         }
@@ -302,6 +373,8 @@ public final class RecordingController {
             let chunks = await engine.chunks().filter { dead.engineSessions.contains($0.sessionId) }
             dead.endWallMs = chunks.map(\.lastWallMs).max() ?? dead.startWallMs
             dead.endReason = "process_died"
+            // It holds the recording's closing events, so an export needs it.
+            if let recoverySession { dead.engineSessions.append(recoverySession) }
             try? recordings.save(dead)
             onEnded?(dead)
         }

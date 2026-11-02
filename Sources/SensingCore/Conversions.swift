@@ -77,6 +77,24 @@ public struct Decimator: Sendable {
     }
 }
 
+/// Keeps a stream's time moving forward. Sources that stamp a reading with its own time can deliver one older than what's already
+/// been written: CoreLocation's first fix can be cached from before the recording, and a query at Stop can repeat an update.
+public struct ForwardGate: Sendable {
+    private var lastNs: Int64
+
+    public init(startNs: Int64 = .min) { lastNs = startNs }
+
+    /// Whether a reading at this time can be written.
+    public mutating func admit(tsNs: Int64) -> Bool {
+        guard tsNs >= lastNs else { return false }
+        lastNs = tsNs
+        return true
+    }
+
+    /// For an event stamped "now": moves the gate on, so that an older reading can't follow it.
+    public mutating func note(tsNs: Int64) { lastNs = max(lastNs, tsNs) }
+}
+
 /// The sensors this SDK's adapters can run, with Android's default rates where they apply.
 public enum SensingCatalog {
     public static let accelerometer = SensorID(known: "motion.accelerometer")

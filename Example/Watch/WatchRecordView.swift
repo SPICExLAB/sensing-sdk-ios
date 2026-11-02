@@ -76,6 +76,12 @@ struct WatchRecordView: View {
                 }
             }
             if !model.message.isEmpty { Text(model.message).font(.caption2) }
+            #if DEBUG
+            Section("Debug") {
+                // A8: the system should bring this app back within 30 s, with the workout alive and the gap recorded.
+                Button("Crash now", role: .destructive) { fatalError("A8: a deliberate crash") }
+            }
+            #endif
         }
     }
 }

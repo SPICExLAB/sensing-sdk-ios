@@ -55,6 +55,16 @@ public final class PhoneLink: LinkTransportDelegate {
         drainIncoming()  // what a crash left behind
     }
 
+    /// Whether the watch app is there can't be known until the session has activated, which takes a moment after launch. Waits
+    /// at most `timeoutMs`. By the time this is called the phone is recording already, so this delays only the watch.
+    public func waitUntilActive(timeoutMs: Int64 = 2000) async {
+        var waited: Int64 = 0
+        while !transport.isActivated, waited < timeoutMs {
+            try? await Task.sleep(for: .milliseconds(50))
+            waited += 50
+        }
+    }
+
     public var desired: DesiredState? { persisted.desired }
     private var recordingId: String? { persisted.desired?.recording?.id }
 

@@ -257,6 +257,17 @@ public final class ActivitySessions: @unchecked Sendable {
         }
     }
 
+    /// A label of its own for the running session, written through the outbox. Returns false if there's no session of this
+    /// device's to put it in: a mirrored one has the phone's labels.
+    public func upsertLabel(_ attributes: [String: String]) -> Bool {
+        lock.withLock {
+            guard let a = currentActive, !a.mirrored else { return false }
+            outbox.add([("label_upsert", attributes.merging(["session_id": a.spec.sessionId]) { _, new in new })])
+            persist()
+            return true
+        }
+    }
+
     /// The person chose not to answer.
     public func skipLast() { closeLast { _ in } }
 

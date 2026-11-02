@@ -120,6 +120,8 @@ public protocol LinkTransport: AnyObject, Sendable {
     /// `transferFile`: queued, and survives this app's death.
     func transfer(file: URL, chunkId: String, metadata: Data)
     var outstandingTransfers: Set<String> { get }
+    /// A line for a diagnostics screen.
+    var facts: String { get }
 }
 
 /// `device.clock peer_clock` at the middle of a round trip, which removes the transit bias of Android's one-way hello. The
