@@ -1,6 +1,6 @@
 # Agents: working in sensing-sdk-ios
 
-Read [`README.md`](README.md), then [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS.md) and [`docs/plan/PLAN.md`](docs/plan/PLAN.md). Android's `sensing-sdk/AGENTS.md` explains the format and the engine this repo mirrors.
+Read [`README.md`](README.md), then [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS.md) and [`docs/plan/PLAN.md`](docs/plan/PLAN.md). Android's `sensing-sdk-android/AGENTS.md` explains the format and the engine this repo mirrors.
 
 ## How work lands
 
@@ -12,7 +12,7 @@ Read [`README.md`](README.md), then [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS
 ## Rules that must not break
 
 - **This repo will go public (S-019).** Treat every commit as public: read the diff stat before committing, and never commit build output, exports, keys or copies of private code. A mistake means rewriting history, and even then GitHub keeps its PR refs.
-- **The format is Android's.** `proto/` is a copy of Android's `envelope.proto`, compared against the pin in `proto/SENSING_SDK_REF`. Never edit it here: change it in `sensing-sdk` first, additively, then bump the pin. There's no platform field in the envelope, so values are converted to Android's units and signs on the device, and axes are never remapped.
+- **The format is Android's.** `proto/` is a copy of Android's `envelope.proto`, compared against the pin in `proto/SENSING_SDK_REF`. Never edit it here: change it in `sensing-sdk-android` first, additively, then bump the pin. There's no platform field in the envelope, so values are converted to Android's units and signs on the device, and axes are never remapped.
 - **`ts_mono_ns` counts sleep, as Android's `elapsedRealtimeNanos` does.** `CMLogItem.timestamp` doesn't. Never judge timing by arrival time, only by `ts_mono_ns`: Wi-Fi bunching once produced dozens of fake dropouts.
 - **`Int` is 32 bits on the watch.** Nanoseconds, seq and byte totals are `Int64`. macOS tests can't catch this, and `scripts/check.sh` flags `Int(` in Core and Storage.
 - **Nothing downstream may slow the write path, and loss is always recorded.** A sample callback never does I/O, never hops to a task, and never allocates a string. Drops consume their `seq` and appear in `device.gap`.

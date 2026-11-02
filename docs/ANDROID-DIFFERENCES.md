@@ -1,6 +1,6 @@
 # Differences from the Android SDK
 
-What a data consumer has to know when iOS and Android data sit side by side. The format is the same; these are the places where the meaning or the coverage differs. Android's source is `sensing-sdk` @183d765.
+What a data consumer has to know when iOS and Android data sit side by side. The format is the same; these are the places where the meaning or the coverage differs. Android's source is `sensing-sdk-android` @183d765.
 
 _Status: started 2026-11-02; each phase adds what it finds._
 

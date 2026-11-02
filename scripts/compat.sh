@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proves the chunk format against Android's and the ingest's real decoders, comparing decoded content (gzip output and
-# map order vary, so bytes are the wrong target). Nothing committed in the other repos changes. It needs ../sensing-sdk
+# map order vary, so bytes are the wrong target). Nothing committed in the other repos changes. It needs ../sensing-sdk-android
 # and ../inrtl-lab checkouts, Go, and network for Gradle's first run.
 #   scripts/compat.sh                    Swift writes, JVM and Go read
 #   scripts/compat.sh --regen-fixtures   also rewrites Tests/Fixtures from JVM and Go writers
@@ -16,7 +16,7 @@ step() { printf '%-48s' "$1"; }
 pass() { echo "ok${1:+  ($1)}"; }
 fail() { echo "FAILED: $1"; FAILED=1; }
 
-gradle_run() { ../sensing-sdk/gradlew -q -p tools/android-compat run --args="$1" 2>"$TMP/gradle.err"; }
+gradle_run() { ../sensing-sdk-android/gradlew -q -p tools/android-compat run --args="$1" 2>"$TMP/gradle.err"; }
 
 overlay() {
   cat > "$TMP/overlay.json" <<JSON
@@ -25,7 +25,7 @@ JSON
 }
 
 go_status_before=$(git -C ../inrtl-lab status --porcelain)
-sdk_status_before=$(git -C ../sensing-sdk status --porcelain)
+sdk_status_before=$(git -C ../sensing-sdk-android status --porcelain)
 
 step "Swift writes the fixture"
 if out=$(swift run -q sensing-compat write "$TMP/swift" 2>&1); then pass "$out"; else fail "$out"; fi
@@ -73,7 +73,7 @@ if [ -d Tests/Fixtures/android ] && out=$(swift test --filter FixtureTests 2>&1)
 else fail "$(echo "${out:-no fixtures: run with --regen-fixtures}" | tail -15)"; fi
 
 step "the other repos are untouched"
-if [ "$go_status_before" = "$(git -C ../inrtl-lab status --porcelain)" ] && [ "$sdk_status_before" = "$(git -C ../sensing-sdk status --porcelain)" ]; then pass; else fail "git status changed"; fi
+if [ "$go_status_before" = "$(git -C ../inrtl-lab status --porcelain)" ] && [ "$sdk_status_before" = "$(git -C ../sensing-sdk-android status --porcelain)" ]; then pass; else fail "git status changed"; fi
 
 rm -rf "$TMP"
 [ "$FAILED" = 0 ] && echo "compat: all checks pass"

@@ -14,13 +14,13 @@ job() { # name, command...
 }
 
 proto_matches_android() {
-  [ -d ../sensing-sdk/.git ] || { echo "no ../sensing-sdk checkout: skipped"; return 0; }
-  git -C ../sensing-sdk show "$(cat proto/SENSING_SDK_REF):sensing-model/src/main/proto/sensorlog/v1/envelope.proto" |
+  [ -d ../sensing-sdk-android/.git ] || { echo "no ../sensing-sdk-android checkout: skipped"; return 0; }
+  git -C ../sensing-sdk-android show "$(cat proto/SENSING_SDK_REF):sensing-model/src/main/proto/sensorlog/v1/envelope.proto" |
     cmp - proto/sensorlog/v1/envelope.proto
 }
 
 # The engine is an actor with no suspension points, so it can't hit the re-entrancy bug class Android's engine hit
-# (sensing-sdk AGENTS.md: a loop over batchers across a suspension point crashed).
+# (sensing-sdk-android AGENTS.md: a loop over batchers across a suspension point crashed).
 no_await_in_engine() {
   [ -d Sources/SensingEngine/Engine ] || return 0
   # Lines that are only a comment don't count.
