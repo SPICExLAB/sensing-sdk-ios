@@ -23,7 +23,8 @@ proto_matches_android() {
 # (sensing-sdk AGENTS.md: a loop over batchers across a suspension point crashed).
 no_await_in_engine() {
   [ -d Sources/SensingEngine/Engine ] || return 0
-  ! grep -rnE '\bawait\b' Sources/SensingEngine/Engine --include='*.swift' | grep -v '// await-ok'
+  # Lines that are only a comment don't count.
+  ! grep -rnE '\bawait\b' Sources/SensingEngine/Engine --include='*.swift' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' | grep -v '// await-ok'
 }
 
 # Int is 32 bits on the watch's arm64_32, and macOS tests can't catch an overflow: nanoseconds, seq and byte totals are
