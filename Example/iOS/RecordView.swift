@@ -17,6 +17,10 @@ final class RecordModel {
         }
     }
     private(set) var recordings: [RecordingSummary] = []
+    /// The recording being written to a zip, and the zip once it's ready to share.
+    private(set) var exportingId: String?
+    var exportFile: ExportFile?
+    private(set) var exportFailure: String?
     var activity: TaxonomyNode?
     let taxonomy = Taxonomy.load()
     /// Motion rates in Hz, and which sensors are on, for each device. Saved between launches.
@@ -36,6 +40,8 @@ final class RecordModel {
             let s = try Sensing(options: options)
             s.onEnded = { [weak self] summary in
                 self?.message = "Ended: \(summary.endReason ?? "")"
+                // Each recording needs its own answer: a label carried over could be wrong without anyone noticing.
+                self?.activity = nil
                 self?.reload()
             }
             sensing = s
@@ -84,6 +90,29 @@ final class RecordModel {
 
     func reload() { recordings = sensing?.recordings() ?? [] }
 
+    func export(id: String) {
+        guard let sensing, exportingId == nil else { return }
+        exportingId = id
+        exportFailure = nil
+        Task {
+            do {
+                let url = try await sensing.export(id: id)
+                #if DEBUG
+                print("record: exported \(url.path)")
+                #endif
+                exportFile = ExportFile(url: url)
+            } catch {
+                exportFailure = String(describing: error)
+            }
+            exportingId = nil
+        }
+    }
+
+    /// The zip is a copy of someone's data, so it doesn't stay once the share sheet has done with it.
+    func removeExport() {
+        try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("exports", isDirectory: true))
+    }
+
     /// The same attributes as the lab app's activities (`Activities.kt`), so that a recording here projects the same way.
     static func spec(activity: TaxonomyNode, taxonomyVersion: Int64) -> RecordingSpec {
         RecordingSpec(label: activity.name,
@@ -93,6 +122,14 @@ final class RecordModel {
     }
 
     #if DEBUG
+    /// `-tab 1 -exportLatest YES` takes the newest finished recording through the app's own export.
+    func runExportArgument() async {
+        guard UserDefaults.standard.bool(forKey: "exportLatest") else { return }
+        await sensing?.prepare()
+        reload()
+        if let latest = recordings.first(where: { $0.endWallMs != nil }) { export(id: latest.id) }
+    }
+
     /// `devicectl device process launch … -- -recordAutostart YES -recordSeconds 60 -recordHz 100 -recordWatch NO`
     func runLaunchArguments() {
         let defaults = UserDefaults.standard
@@ -159,12 +196,21 @@ struct RecordView: View {
                     }
             } else {
                 Button { picking = true } label: {
-                    LabeledContent("Activity", value: model.activity?.name ?? "Choose")
+                    LabeledContent("Activity") {
+                        if let activity = model.activity {
+                            Text(activity.name)
+                        } else {
+                            Text("Choose (required)").foregroundStyle(.red)
+                        }
+                    }
                 }
                 if sensing.status.watchInstalled {
                     Toggle("Also record on the watch", isOn: Binding(get: { sensing.recordWatch }, set: { sensing.recordWatch = $0 }))
                 }
                 Button("Start") { model.start() }.disabled(model.activity == nil)
+                if model.activity == nil {
+                    Text("Choose an activity to start: every recording needs a label.").font(.caption).foregroundStyle(.secondary)
+                }
             }
             ForEach(sensing.status.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.red) }
         }

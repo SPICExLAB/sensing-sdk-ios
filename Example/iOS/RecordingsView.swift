@@ -8,17 +8,22 @@ struct RecordingsView: View {
     let model: RecordModel
 
     var body: some View {
+        @Bindable var model = model
         NavigationStack {
             List {
                 ForEach(model.recordings) { r in
-                    NavigationLink(value: r.id) {
-                        VStack(alignment: .leading) {
-                            Text(r.label)
-                            Text("\(Date(timeIntervalSince1970: Double(r.startWallMs) / 1000).formatted()) · \(Self.duration(r)) · \(r.endReason ?? "running")")
-                                .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        NavigationLink(value: r.id) {
+                            VStack(alignment: .leading) {
+                                Text(r.label)
+                                Text("\(Date(timeIntervalSince1970: Double(r.startWallMs) / 1000).formatted()) · \(Self.duration(r)) · \(r.endReason ?? "running")")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
+                        ExportButton(model: model, recording: r, title: nil)
                     }
                 }
+                if let failure = model.exportFailure { Text(failure).font(.caption).foregroundStyle(.red) }
             }
             .overlay {
                 if model.recordings.isEmpty { ContentUnavailableView("No recordings yet", systemImage: "waveform.path.ecg") }
@@ -26,6 +31,10 @@ struct RecordingsView: View {
             .navigationTitle("Recordings")
             .navigationDestination(for: String.self) { RecordingDetailView(id: $0, model: model) }
             .onAppear { model.reload() }
+            #if DEBUG
+            .task { await model.runExportArgument() }
+            #endif
+            .sheet(item: $model.exportFile, onDismiss: model.removeExport) { ShareSheet(url: $0.url) }
         }
     }
 
@@ -35,17 +44,38 @@ struct RecordingsView: View {
     }
 }
 
-private struct ExportFile: Identifiable {
+struct ExportFile: Identifiable {
     let url: URL
     var id: String { url.path }
+}
+
+/// Writes the recording to a zip and opens the share sheet. A recording still running can't be exported yet.
+struct ExportButton: View {
+    let model: RecordModel
+    let recording: RecordingSummary
+    /// Nil for just the icon, as in the list.
+    let title: String?
+
+    var body: some View {
+        let busy = model.exportingId != nil
+        Button { model.export(id: recording.id) } label: {
+            if model.exportingId == recording.id {
+                ProgressView()
+            } else if let title {
+                Label(title, systemImage: "square.and.arrow.up")
+            } else {
+                Label("Export \(recording.label)", systemImage: "square.and.arrow.up").labelStyle(.iconOnly)
+            }
+        }
+        .buttonStyle(.borderless)  // or a tap anywhere in a list row would press it
+        .disabled(busy || recording.endWallMs == nil)
+    }
 }
 
 struct RecordingDetailView: View {
     let id: String
     let model: RecordModel
     @State private var details: RecordingDetails?
-    @State private var exporting = false
-    @State private var export: ExportFile?
     @State private var failure: String?
     @State private var confirmingDelete = false
     @Environment(\.dismiss) private var dismiss
@@ -59,12 +89,13 @@ struct RecordingDetailView: View {
                 if !phone.isEmpty { streams("iPhone", phone) }
                 if !watch.isEmpty { streams("Watch", watch) }
                 Section {
-                    Button(exporting ? "Preparing…" : "Export") { startExport() }.disabled(exporting)
+                    ExportButton(model: model, recording: details.recording, title: "Export")
                     Button("Delete", role: .destructive) { confirmingDelete = true }
                 } footer: {
                     Text("An export is a zip of the chunks and a manifest. It's someone's data: only share it where it belongs.")
                 }
                 if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
+                if let failure = model.exportFailure { Text(failure).font(.caption).foregroundStyle(.red) }
             } else {
                 ProgressView("Reading chunks…")
             }
@@ -72,7 +103,6 @@ struct RecordingDetailView: View {
         .navigationTitle(details?.recording.label ?? "Recording")
         .navigationBarTitleDisplayMode(.inline)
         .task { details = await model.sensing?.details(of: id) }
-        .sheet(item: $export, onDismiss: removeExport) { ShareSheet(url: $0.url) }
         .confirmationDialog("Delete this recording from this phone? This can't be undone.", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { delete() }
         }
@@ -104,26 +134,6 @@ struct RecordingDetailView: View {
                 }
             }
         }
-    }
-
-    private func startExport() {
-        guard let sensing = model.sensing else { return }
-        exporting = true
-        failure = nil
-        Task {
-            do {
-                export = ExportFile(url: try await sensing.export(id: id))
-            } catch {
-                failure = String(describing: error)
-            }
-            exporting = false
-        }
-    }
-
-    /// The zip is a copy of someone's data, so it doesn't stay once the share sheet has done with it.
-    private func removeExport() {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("exports", isDirectory: true)
-        try? FileManager.default.removeItem(at: directory)
     }
 
     private func delete() {
