@@ -16,7 +16,7 @@ The Android `sensing-sdk` records phone and watch sensors to disk in the `sensor
 - Recording runs from Start to Stop, with the screen locked. An always-on mode can be added later and isn't built now.
 - Sensors: motion core, location and activity, device state, sound level and Bluetooth.
 - The example app has activity labels.
-- New repo: `~/code/sensing-sdk-ios`, private as `project-ursula/sensing-sdk-ios`.
+- New repo: `~/code/sensing-sdk-ios`, private as `project-ursula/sensing-sdk-ios`. It moved to `SPICExLAB/sensing-sdk-ios` afterwards (S-022).
 
 **Defaults I chose; say so if you disagree:**
 1. **Same data format as Android:** same proto, chunk framing, sensor ids and units, converted on the device. An upload protocol exists in the SDK, with no cloud implementation. The watch-to-phone transfer uses that protocol, so the seam gets exercised.
