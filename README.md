@@ -1,6 +1,6 @@
 # sensing-sdk-ios
 
-A Swift SDK that records iPhone and Apple Watch sensors to disk, plus an example data-collection app. It's the counterpart of the Android [`sensing-sdk`](https://github.com/rahul-islam/sensing-sdk) and writes the same `sensorlog.v1` chunk format, so the data can sit alongside Android's without conversion. It isn't connected to inrtl Lab yet: data stays on the device and is exported by hand.
+A Swift SDK that records iPhone and Apple Watch sensors to disk, plus an example data-collection app. It's the counterpart of the Android [`sensing-sdk-android`](https://github.com/rahul-islam/sensing-sdk-android) and writes the same `sensorlog.v1` chunk format, so the data can sit alongside Android's without conversion. It isn't connected to inrtl Lab yet: data stays on the device and is exported by hand.
 
 **Status: in progress.** See [`docs/plan/PROGRESS.md`](docs/plan/PROGRESS.md).
 
@@ -23,7 +23,7 @@ scripts/check.sh           # everything a PR must pass: lints, tests, iOS and wa
 scripts/check.sh --quick   # lints and tests only
 scripts/gen-proto.sh       # regenerate Sources/SensingProto from proto/
 scripts/compat.sh          # proves the format against Android's and the ingest's real decoders
-                           # (needs ../sensing-sdk, ../inrtl-lab and Go; run it whenever storage changes)
+                           # (needs ../sensing-sdk-android, ../inrtl-lab and Go; run it whenever storage changes)
 ```
 
 ## Checking a recording on a Mac
