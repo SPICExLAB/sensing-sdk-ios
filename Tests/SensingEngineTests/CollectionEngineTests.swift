@@ -397,11 +397,11 @@ final class CollectionEngineTests: XCTestCase {
         await engine.start(config(accel), adapters: [adapter])
         await engine.tick()
         let atStart = await engine.stats().totalSamples
-        XCTAssertEqual(atStart, 2, "device.session start and device.clock")
+        XCTAssertEqual(atStart, 3, "device.session start, device.clock and the first heartbeat")
         feed(adapter, accel, 10)
         await engine.tick()
         let after = await engine.stats().totalSamples
-        XCTAssertEqual(after, 12)
+        XCTAssertEqual(after, 13)
         await engine.stop()
     }
 

@@ -174,6 +174,8 @@ public final class ActivitySessions: @unchecked Sendable {
     public static let stopped = "stopped"
     public static let timeLimit = "time_limit"
     public static let discarded = "discarded"
+    /// The ingest knows only the three above and treats this one as `stopped`, so it's safe, but that loses the reason.
+    public static let processDied = "process_died"
 
     public enum SessionError: Error, Equatable {
         case alreadyRunning
@@ -229,6 +231,14 @@ public final class ActivitySessions: @unchecked Sendable {
         end(reason: Self.discarded, answers: [:], wallMs: clock.wallMs(), monoNs: clock.monoNs())
     }
 
+    /// The process died during this session: it ends where the data ends. A later launch can still ask its questions.
+    /// `monoNs` is dropped if a reboot has reset the clock since.
+    public func endAfterProcessDeath(wallMs: Int64, monoNs: Int64?) {
+        guard let a = active else { return }
+        let sameBoot = a.startMonoNs <= clock.monoNs()
+        end(reason: Self.processDied, answers: [:], wallMs: wallMs, monoNs: sameBoot ? monoNs : nil)
+    }
+
     /// A session past its limit ends at its deadline, also if the process died meanwhile. Returns whether it did.
     @discardableResult
     public func expireIfDue() -> Bool {
@@ -263,7 +273,7 @@ public final class ActivitySessions: @unchecked Sendable {
     /// Writes the due events into the stream, in order, stopping at the first one the engine refuses because it's stopped.
     /// Returns how many were written.
     @discardableResult
-    public func flush(emit: (String, [String: String]) async -> Bool) async -> Int64 {
+    public func flush(emit: @Sendable (String, [String: String]) async -> Bool) async -> Int64 {
         let due: [LabelOutbox.Entry] = lock.withLock {
             outbox.prune(nowMonoMs: clock.monoNs() / 1_000_000)
             persist()
@@ -294,7 +304,7 @@ public final class ActivitySessions: @unchecked Sendable {
     private func end(reason: String, answers: [String: String], wallMs: Int64, monoNs: Int64?) {
         lock.withLock {
             guard let a = currentActive else { return }
-            let answered = reason != Self.timeLimit
+            let answered = reason != Self.timeLimit && reason != Self.processDied
             let e = EndedSession(session: a, endWallMs: wallMs, endMonoNs: monoNs, reason: reason, answered: answered)
             if !a.mirrored { outbox.add(SessionEvents.end(e, answers: answers)) }
             currentActive = nil

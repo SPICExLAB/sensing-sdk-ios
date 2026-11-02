@@ -67,3 +67,11 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 - ☑ A real process at full rate with the real timer, killed with SIGKILL and recovered: every stream contiguous from 0, under 3 s lost. A batch reaches the file every 2 to 2.5 s, which sets that bound
 - ☑ `scripts/compat.sh` now judges real `SessionEvents`: 8 label events, including a discarded session, became 4 session writes and 4 label writes in the ingest's `projectLabels`, with nothing skipped
 - Tests found 3 real bugs, all fixed: events raised during Stop's final drain were lost; a sample took 145 bytes because a rare large payload was stored inline; delete-oldest could evict label chunks and the eviction records themselves, which Android's can too
+
+## P4
+
+- ☑ `MotionAdapter`, `AltimeterAdapter`, `PedometerAdapter`, with `Conversions` and `Decimator` tested on macOS
+- ☑ `Sensing`, the iPhone's public API, on `RecordingController`, which holds the whole recording flow with no platform code and is tested with fake sensors: labels, a double tap on Start, Stop during Start, discard, the time limit, a full disk, crash recovery
+- ☑ A minimal Record tab in the example app, driven from the command line in debug builds for device tests
+- ☑ First real chunks, iPhone 15 Pro, iOS 26.7.1, 2026-11-02, screen on and at rest, debug build, 40 s with the six motion streams at 100 Hz: 100.53 Hz, nothing lost, no motion gap over 10 ms, `sensing-decode --check` clean, 8.1% of one core. Gravity 9.807 m/s² with Android's signs, linear acceleration and gyroscope near zero, field 40 µT, unit quaternions, 997.5 hPa. About 14 KiB/s on disk at that rate
+- ☐ A1, A3, A4 and A11 (phone)

@@ -81,5 +81,9 @@ extension XCTestCase {
 
 extension Sequence where Element == Sensorlog_V1_SensorSample {
     func stream(_ id: String) -> [Sensorlog_V1_SensorSample] { filter { $0.sensorID == id }.sorted { $0.seq < $1.seq } }
-    func events(_ id: String, _ kind: String) -> [Sensorlog_V1_SensorSample] { stream(id).filter { $0.event.kind == kind } }
+    /// In time order. `seq` restarts with each engine session, and sessions are read back in directory order, so `seq` alone
+    /// says nothing about which of two sessions came last.
+    func events(_ id: String, _ kind: String) -> [Sensorlog_V1_SensorSample] {
+        stream(id).filter { $0.event.kind == kind }.sorted { ($0.tsMonoNs, $0.seq) < ($1.tsMonoNs, $1.seq) }
+    }
 }

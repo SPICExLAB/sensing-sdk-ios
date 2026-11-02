@@ -23,6 +23,9 @@ public actor CollectionEngine {
         public var policy = RetentionPolicy()
         public var retentionMode = RetentionMode.stopWhenFull
         public var retentionCheckMs: Int64 = 30_000
+        /// `device.health heartbeat`: how A3 and A6 measure CPU and battery.
+        public var heartbeatMs: Int64 = 60_000
+        public var heartbeatExtras: (@Sendable () -> [String: String])?
         /// A tick this late means the process didn't run, or the device slept.
         public var stallThresholdMs: Int64 = 5000
         /// Failed batches held for a retry before they're given up as a recorded gap.
@@ -105,6 +108,8 @@ public actor CollectionEngine {
     private var lastClockEventMs: Int64 = 0
     private var lastRetentionMs: Int64 = 0
     private var lastWindowMs: Int64 = 0
+    private var lastHeartbeatMs: Int64 = 0
+    private var sessionStartMs: Int64 = 0
     private var lastTickMono: Int64 = 0
     private var lastOffset: Int64 = 0
     private var emittedEvictions: Set<String> = []
@@ -160,6 +165,8 @@ public actor CollectionEngine {
         lastClockEventMs = nowMs
         lastRetentionMs = nowMs
         lastWindowMs = nowMs
+        lastHeartbeatMs = nowMs
+        sessionStartMs = nowMs
         lastTickMono = clock.monoNs()
         lastOffset = clock.monoNs() - clock.uptimeNs()
 
@@ -167,6 +174,7 @@ public actor CollectionEngine {
         startAttrs["reason"] = reason
         emit(SensorIDs.session, "start", startAttrs)
         emitClock()
+        emitHeartbeat(nowMs: nowMs, reason: "session_start")
 
         // A sensor that was asked for but can't run is said out loud, once per session.
         var claimed: Set<SensorID> = []
@@ -199,6 +207,7 @@ public actor CollectionEngine {
         timer?.cancel()
         timer = nil
         for run in runs where run.running { run.adapter.stop() }
+        emitHeartbeat(nowMs: clock.monoNs() / 1_000_000, reason: "session_end")
         emit(SensorIDs.session, "end", ["reason": reason])
         // Draining can raise events of its own (a late stream's gap, a failed write), and those have to land too.
         repeat {
@@ -271,6 +280,10 @@ public actor CollectionEngine {
         if nowMs - lastRetentionMs >= options.retentionCheckMs {
             lastRetentionMs = nowMs
             checkStorage(reason: "tick")
+        }
+        if nowMs - lastHeartbeatMs >= options.heartbeatMs {
+            lastHeartbeatMs = nowMs
+            emitHeartbeat(nowMs: nowMs, reason: "periodic")
         }
         rollWindows(nowMs: nowMs)
         if !retries.isEmpty, store.status.freeBytes <= 0 { stopItself("disk_full") }
@@ -408,6 +421,15 @@ public actor CollectionEngine {
 
     private func emitClock() {
         emit(SensorIDs.clock, "clock", ["mono_ns": String(clock.monoNs()), "wall_ms": String(clock.wallMs())])
+    }
+
+    private func emitHeartbeat(nowMs: Int64, reason: String) {
+        let storage = store.status
+        var attrs = ["reason": reason, "samples_total": String(total), "pending_persist": String(intake.pending), "dropped": String(intake.dropped),
+                     "adapter_failures": String(adapterFailures), "storage_bytes": String(storage.bytesOnDisk), "storage_quota_bytes": String(storage.quotaBytes),
+                     "uptime_ms": String(nowMs - sessionStartMs), "cpu_ms": String(ProcessCPU.milliseconds())]
+        for (key, value) in options.heartbeatExtras?() ?? [:] { attrs[key] = value }
+        emit(SensorIDs.health, "heartbeat", attrs)
     }
 
     private func recordDrop(_ run: Intake.DropRun) {

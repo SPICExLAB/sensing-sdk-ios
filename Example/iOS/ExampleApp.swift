@@ -6,10 +6,14 @@ struct ExampleApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DiagnosticsView(probe: probe)
-                #if DEBUG
-                .task { probe.runLaunchArguments() }
-                #endif
+            TabView {
+                RecordView().tabItem { Label("Record", systemImage: "record.circle") }
+                DiagnosticsView(probe: probe)
+                    #if DEBUG
+                    .task { probe.runLaunchArguments() }
+                    #endif
+                    .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+            }
         }
     }
 }
