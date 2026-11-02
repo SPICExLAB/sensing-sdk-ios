@@ -1,0 +1,10 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcodeproj
+*.xcworkspace
+# Exports and decoded data are participants' data: they never belong in the repo
+exports/
+*.csv

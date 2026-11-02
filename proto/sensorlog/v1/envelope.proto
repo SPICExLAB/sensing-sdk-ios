@@ -1,0 +1,98 @@
+// sensorlog.v1 — the single source of truth for the phone, the watch, the ingest
+// API and the warehouse.
+//
+// Rules:
+//  - Envelope changes are additive only. Never renumber or reuse a tag.
+//  - schema_version is per sensor payload, not global.
+//  - TensorPayload is the escape hatch for data without a typed payload yet.
+syntax = "proto3";
+
+package sensorlog.v1;
+
+option java_package = "com.rahulislam.sensing.core.proto";
+
+enum Accuracy {
+  ACCURACY_UNSPECIFIED = 0;
+  ACCURACY_UNRELIABLE = 1;
+  ACCURACY_LOW = 2;
+  ACCURACY_MEDIUM = 3;
+  ACCURACY_HIGH = 4;
+}
+
+enum DeviceKind {
+  DEVICE_KIND_UNSPECIFIED = 0;
+  PHONE = 1;
+  WATCH = 2;
+}
+
+message Vec3Payload {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+message QuatPayload {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+  float w = 4;
+  float heading_accuracy = 5;
+}
+
+message ScalarPayload {
+  float value = 1;
+}
+
+message LocationPayload {
+  double lat = 1;
+  double lon = 2;
+  double alt = 3;
+  float accuracy = 4;
+  float speed = 5;
+  float bearing = 6;
+  string provider = 7;
+  // Raw-fix fields (added 2026-09-22); 0 when the provider did not report them.
+  float vertical_accuracy = 8;
+  float speed_accuracy = 9;
+  float bearing_accuracy = 10;
+  uint32 satellites = 11;          // used in the fix, from the GPS provider's extras
+  int64 elapsed_realtime_uncertainty_ns = 12;
+}
+
+message EventPayload {
+  string kind = 1;
+  map<string, string> attributes = 2;
+}
+
+// Raw GNSS, scan lists, model outputs.
+message TensorPayload {
+  repeated uint32 shape = 1;
+  repeated float values = 2;
+  repeated string names = 3;
+}
+
+message SensorSample {
+  string device_id = 1;
+  string session_id = 2;
+  string sensor_id = 3;
+  uint64 seq = 4;         // per-sensor, contiguous within a session
+  int64 ts_mono_ns = 5;   // SystemClock.elapsedRealtimeNanos() of the sensor event
+  int64 ts_wall_ms = 6;   // ts_mono_ns plus the per-session offset
+  uint32 schema_version = 7;
+  Accuracy accuracy = 8;
+  DeviceKind device_kind = 9;
+
+  oneof payload {
+    Vec3Payload vec3 = 10;
+    QuatPayload quat = 11;
+    ScalarPayload scalar = 12;
+    LocationPayload location = 13;
+    EventPayload event = 14;
+    TensorPayload tensor = 15;
+  }
+}
+
+message SampleBatch {
+  string sensor_id = 1;
+  repeated SensorSample samples = 2;   // same sensor, contiguous seq
+}
