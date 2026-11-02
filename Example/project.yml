@@ -15,7 +15,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "3" # raise it for every build you install: watchOS only updates the watch app to a higher build
+    CURRENT_PROJECT_VERSION: "4" # raise it for every build you install: watchOS only updates the watch app to a higher build
 targets:
   Example:
     type: application
@@ -35,10 +35,12 @@ targets:
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        UIBackgroundModes: [location, workout-processing] # audio and bluetooth-central come with those sensors (P6), so they can't hide a keep-alive failure here
+        UIBackgroundModes: [location, audio, bluetooth-central, workout-processing]
         UIFileSharingEnabled: true # recordings can be copied off with `devicectl device copy` or Finder
         LSSupportsOpeningDocumentsInPlace: true
         NSMotionUsageDescription: Records your iPhone's motion sensors for the activity you choose.
+        NSMicrophoneUsageDescription: If you turn on Sound level, measures how loud it is. No audio is kept, written or sent.
+        NSBluetoothAlwaysUsageDescription: If you turn on Bluetooth, counts nearby devices by signal strength. Their identifiers are hashed.
         NSLocationWhenInUseUsageDescription: Keeps recording while your iPhone is locked, and records location if you turn it on.
         NSHealthShareUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is read from Health.
         NSHealthUpdateUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is saved to Health.
@@ -67,8 +69,10 @@ targets:
         WKApplication: true
         ITSAppUsesNonExemptEncryption: false
         WKCompanionAppBundleIdentifier: com.rahulislam.sensing.example
-        WKBackgroundModes: [workout-processing]
+        WKBackgroundModes: [workout-processing, location]
         NSMotionUsageDescription: Records your watch's motion sensors for the activity you choose.
+        NSMicrophoneUsageDescription: If you turn on Sound level, measures how loud it is. No audio is kept, written or sent.
+        NSLocationWhenInUseUsageDescription: If you turn on Location for the watch, records where you were during a recording.
         NSHealthShareUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is read from Health.
         NSHealthUpdateUsageDescription: Runs a workout session so sensors keep recording with the screen off. Nothing is saved to Health.
     entitlements:

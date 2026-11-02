@@ -10,7 +10,7 @@ import SensingStorage
 import WatchKit
 
 /// The watch's public API. It records what the phone asks for, under a workout session that keeps it running wrist-down, and
-/// sends its chunks to the phone. A recording starts on the phone; the watch can only stop one (S-006).
+/// sends its chunks to the phone. A recording starts on the phone; the watch can only stop one (S-010).
 @MainActor
 @Observable
 public final class WatchSensing {
@@ -45,7 +45,7 @@ public final class WatchSensing {
         let deviceId = try DeviceIdentity.load(root: root)
         controller = RecordingController(
             root: root, deviceId: deviceId, catalog: SensingCatalog.watch,
-            adapters: [MotionAdapter(), AltimeterAdapter(), PedometerAdapter()],
+            adapters: [MotionAdapter(), AltimeterAdapter(), PedometerAdapter(), LocationAdapter(), ActivityAdapter(), BatteryAdapter(), ScreenAdapter(), NetworkAdapter(), AudioLevelAdapter()],
             device: DeviceDescription(platform: "watchos", model: DeviceModel.machine(), os: "\(device.systemName) \(device.systemVersion)", appVersion: appVersion, sdkVersion: SDK.version,
                                       extras: ["wrist": device.wristLocation == .left ? "left" : "right", "crown": device.crownOrientation == .left ? "left" : "right"]),
             options: options)

@@ -88,3 +88,10 @@ Plan: [PLAN.md](PLAN.md) · Decisions: [DECISIONS.md](DECISIONS.md) · Open ques
 - Testing and review found 4 real bugs, all fixed: a duplicate `bad` ack failed every later attempt unsent; a drain could delete the metadata of a chunk still arriving, stranding it; a state arriving before recovery finished could start a recording mid-recovery; a watch recording ended by a crash never told the phone. The second is a race, and the test for it failed only 1 run in 6 with the fix removed, so it can catch that bug but won't every time
 - A refinement to the plan: the watch's Stop button stops the watch at once and tells the phone, rather than waiting for the phone's answer when it's reachable. It's one code path, and the phone stopping is unchanged
 - ☐ **Nothing in this phase has run on a device.** The link has only met the fake, so real WatchConnectivity behaviour is unproven: delivery with the phone locked, the watch's reachability wrist-down, `startWatchApp` under the SDK. A2, A8, A9 and A10 are still to come
+
+## P6
+
+- ☑ `LocationAdapter`, `ActivityAdapter`, `BatteryAdapter`, `ScreenAdapter`, `NetworkAdapter`, `AudioLevelAdapter`, and `BluetoothAdapter` on the phone. All build for iPhone and Apple Watch
+- ☑ What they compute is pure and tested on macOS: Android's `DeviceAdaptersTest` where it applies (the dBFS values, the `[n, 2]` tensor, the network attributes, salted 16-character hashes), plus battery attributes, invalid location values, one-activity-at-a-time transitions and the catalog's defaults
+- ☑ Sound and Bluetooth default to off (S-008). Location and activity default to on for the phone and off for the watch
+- ☐ **None of these adapters has run on a device.** Only their mappings are tested. Permission prompts for the mic and Bluetooth come with P7's Permissions screen; until then those two report `adapter_unavailable`. A11 (the rest), A12 and A13 are still to come

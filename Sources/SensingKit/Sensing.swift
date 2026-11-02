@@ -83,9 +83,11 @@ public final class Sensing {
         engine.heartbeatExtras = { @Sendable in battery.attributes() }
         let motion = MotionAdapter()
         self.motion = motion
+        let deviceId = try DeviceIdentity.load(root: root)
         controller = RecordingController(
-            root: root, deviceId: try DeviceIdentity.load(root: root), catalog: SensingCatalog.phone,
-            adapters: [motion, AltimeterAdapter(), PedometerAdapter()],
+            root: root, deviceId: deviceId, catalog: SensingCatalog.phone,
+            adapters: [motion, AltimeterAdapter(), PedometerAdapter(), LocationAdapter(), ActivityAdapter(), BatteryAdapter(), ScreenAdapter(), NetworkAdapter(),
+                       AudioLevelAdapter(), BluetoothAdapter(salt: deviceId)],
             device: DeviceDescription(platform: "ios", model: DeviceModel.machine(), os: "\(device.systemName) \(device.systemVersion)", appVersion: options.appVersion, sdkVersion: SDK.version),
             options: engine)
         link = PhoneLink(transport: WCLinkTransport(), root: root, engine: controller.engine, recordings: controller.recordings)

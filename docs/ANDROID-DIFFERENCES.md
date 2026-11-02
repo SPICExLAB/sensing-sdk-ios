@@ -18,6 +18,10 @@ _Status: started 2026-11-02; each phase adds what it finds._
 | `loc.fused` | One of two location streams | The only one; CoreLocation exposes no raw GPS fix |
 | `device.screen` | Real screen on and off | Approximate: lock state on the phone, app active state on the watch |
 | `device.bluetooth_scan` | All devices, by MAC address | All devices when open, a fixed list of services when locked; by a per-device UUID |
+| `loc.activity` | Enter and exit from Google's API | The same names from CoreMotion's flags, one activity at a time, with the most specific winning. Adds `confidence` |
+| `device.battery` | Temperature, voltage, health, plug type | None of those: `health` is `unknown`, `plugged` is `none` or `other`. Adds `low_power` and `thermal_state`. The watch is polled every 60 s |
+| `device.network` | Five transports | `wifi`, `cellular`, `ethernet`, `other`, `none`. A watch on its phone's connection reads `other` |
+| `device.audio_level` | `AudioRecord` | `AVAudioEngine` tap, same dBFS math. `silenced` can carry `reason`, such as `interruption` |
 | `label.session` `end_reason` | `stopped`, `time_limit`, `discarded`: a session outlives its process | Adds `process_died`, since a phone crash ends the recording (S-011). The ingest reads an unknown reason as `stopped` (`labels.go:104-107`), so it's safe today but loses the reason until the ingest learns it |
 | `device.session end` `reason` | Android's reasons | Adds `user_stop`, `watch_stop`, `phone_stop`, `superseded`, `keepalive_lost`, `recovery_done`, and on start `workout_recovery` |
 | `device.health heartbeat` | Its own attributes | Additive `cpu_ms`, `uptime_ms`, `battery_pct`, `is_charging`, `low_power`, `thermal_state`, which is how A3 and A6 measure cost |

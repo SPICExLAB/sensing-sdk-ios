@@ -24,17 +24,23 @@
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>If you turn on Bluetooth, counts nearby devices by signal strength. Their identifiers are hashed.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Runs a workout session so sensors keep recording with the screen off. Nothing is read from Health.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Runs a workout session so sensors keep recording with the screen off. Nothing is saved to Health.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Keeps recording while your iPhone is locked, and records location if you turn it on.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>If you turn on Sound level, measures how loud it is. No audio is kept, written or sent.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Records your iPhone's motion sensors for the activity you choose.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>audio</string>
+		<string>bluetooth-central</string>
 		<string>workout-processing</string>
 	</array>
 	<key>UIFileSharingEnabled</key>

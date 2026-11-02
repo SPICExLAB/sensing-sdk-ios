@@ -286,3 +286,195 @@ final class DecimatorTests: XCTestCase {
         XCTAssertTrue(d.take(tsNs: 10_100_000_000))
     }
 }
+
+/// Android's `DeviceAdaptersTest`, case for case where it applies, plus what's particular to iOS.
+final class DeviceMappingTests: XCTestCase {
+    func testBatteryAttributesUseAndroidsNames() {
+        let a = BatteryEvent.attributes(levelFraction: 0.65, charge: .unplugged, lowPower: false, thermalState: 1)
+        XCTAssertEqual(a["level"], "65")
+        XCTAssertEqual(a["scale"], "100")
+        XCTAssertEqual(a["pct"], "65")
+        XCTAssertEqual(a["status"], "discharging")
+        XCTAssertEqual(a["plugged"], "none")
+        XCTAssertEqual(a["health"], "unknown")
+        XCTAssertEqual(a["present"], "true")
+        XCTAssertEqual(a["low_power"], "false")
+        XCTAssertEqual(a["thermal_state"], "1")
+        XCTAssertNil(a["temperature_c"], "iOS has none, so it's absent as on an Android device without one")
+    }
+
+    func testBatteryCharging() {
+        XCTAssertEqual(BatteryEvent.attributes(levelFraction: 1, charge: .full, lowPower: true, thermalState: 0)["status"], "full")
+        XCTAssertEqual(BatteryEvent.attributes(levelFraction: 0.5, charge: .charging, lowPower: false, thermalState: 0)["plugged"], "other")
+    }
+
+    func testAnUnknownBatteryLevelHasNoPercentage() {
+        let a = BatteryEvent.attributes(levelFraction: -1, charge: .unknown, lowPower: false, thermalState: 0)
+        XCTAssertEqual(a["level"], "-1")
+        XCTAssertNil(a["pct"])
+        XCTAssertEqual(a["status"], "unknown")
+    }
+
+    func testNetworkAttributesAreTheThreeFieldsThatDefineAChange() {
+        XCTAssertEqual(NetworkEvent.attributes(transport: "wifi", metered: false, validated: true), ["transport": "wifi", "metered": "false", "validated": "true"])
+        XCTAssertEqual(NetworkEvent.none["transport"], "none")
+    }
+
+    func testDbfsOfFullScaleHalfScaleAndSilence() {
+        XCTAssertEqual(AudioLevel.dbfs(rms: 32767.0 / 32768.0), 0, accuracy: 0.01)
+        XCTAssertEqual(AudioLevel.dbfs(rms: 16384.0 / 32768.0), -6.02, accuracy: 0.05)
+        XCTAssertEqual(AudioLevel.dbfs(rms: 0), AudioLevel.floorDbfs)
+    }
+
+    func testBelowOneStepIsSilence() {
+        XCTAssertEqual(AudioLevel.dbfs(rms: 0.5 / 32768.0), AudioLevel.floorDbfs)
+        XCTAssertGreaterThan(AudioLevel.dbfs(rms: 2.0 / 32768.0), AudioLevel.floorDbfs)
+    }
+
+    func testAnAudioWindowAddsUpBuffersUntilItsFull() {
+        var w = AudioLevel.Window(sampleRate: 48000, milliseconds: 1000)
+        // Half scale, in buffers that don't line up with the window.
+        for _ in 0..<11 { XCTAssertNil(w.add(sumSquares: 0.25 * 4096, count: 4096)) }
+        let level = try? XCTUnwrap(w.add(sumSquares: 0.25 * 4096, count: 4096))
+        XCTAssertEqual(level ?? 0, -6.02, accuracy: 0.05)
+        XCTAssertNil(w.add(sumSquares: 0, count: 100), "it starts over")
+    }
+
+    func testScanRowsBecomeAnNBy2TensorNamedByHash() {
+        let hash = IdentifierHash(salt: "s")
+        var w = BluetoothWindow(salt: "s")
+        w.record(identifier: "aa", rssi: -40, txPower: 4)
+        w.record(identifier: "bb", rssi: -70, txPower: nil)
+        let t = w.finish()
+        XCTAssertEqual(t.shape, [2, 2])
+        XCTAssertEqual(t.values, [-40, 4, -70, 127])
+        XCTAssertEqual(t.names, [hash.hash("aa"), hash.hash("bb")])
+        XCTAssertEqual(w.finish().shape, [0, 2], "the next window starts empty, and an empty scan is still recorded")
+    }
+
+    func testEachDeviceAppearsOnceWithItsLastReading() {
+        var w = BluetoothWindow(salt: "s")
+        w.record(identifier: "aa", rssi: -40, txPower: nil)
+        w.record(identifier: "bb", rssi: -50, txPower: nil)
+        w.record(identifier: "aa", rssi: -60, txPower: 1)
+        XCTAssertEqual(w.finish().values, [-60, 1, -50, 127])
+    }
+
+    func testAnRssiOf127MeansNoReading() {
+        var w = BluetoothWindow(salt: "s")
+        w.record(identifier: "aa", rssi: 127, txPower: nil)
+        XCTAssertEqual(w.finish().shape, [0, 2])
+    }
+
+    func testNoRawIdentifierReachesATensor() {
+        var w = BluetoothWindow(salt: "s")
+        let id = UUID().uuidString.lowercased()
+        w.record(identifier: id, rssi: -40, txPower: nil)
+        let t = w.finish()
+        XCTAssertEqual(t.names.count, 1)
+        XCTAssertFalse(t.names[0].contains(id))
+        XCTAssertEqual(t.names[0].count, 16)
+    }
+
+    private func fix(hAcc: Double = 5, vAcc: Double = 3, speed: Double = 1.5, sAcc: Double = 0.2, course: Double = 90, cAcc: Double = 10) -> LocationMapping.Fix {
+        LocationMapping.Fix(latitude: 51.5, longitude: -0.1, ellipsoidalAltitude: 60, horizontalAccuracy: hAcc, verticalAccuracy: vAcc, speed: speed, speedAccuracy: sAcc, course: course, courseAccuracy: cAcc)
+    }
+
+    func testAFixMapsToAndroidsFields() throws {
+        let p = try XCTUnwrap(LocationMapping.payload(fix()))
+        XCTAssertEqual(p.lat, 51.5)
+        XCTAssertEqual(p.lon, -0.1)
+        XCTAssertEqual(p.alt, 60)
+        XCTAssertEqual(p.accuracy, 5)
+        XCTAssertEqual(p.speed, 1.5)
+        XCTAssertEqual(p.bearing, 90)
+        XCTAssertEqual(p.provider, "corelocation")
+        XCTAssertEqual(p.verticalAccuracy, 3)
+        XCTAssertEqual(p.speedAccuracy, 0.2, accuracy: 1e-6)
+        XCTAssertEqual(p.bearingAccuracy, 10)
+        XCTAssertEqual(p.satellites, 0)
+    }
+
+    func testValuesCoreLocationDoesntHaveBecomeZero() throws {
+        let p = try XCTUnwrap(LocationMapping.payload(fix(vAcc: -1, speed: -1, sAcc: -1, course: -1, cAcc: -1)))
+        XCTAssertEqual(p.alt, 0, "an invalid altitude isn't a real one")
+        XCTAssertEqual(p.speed, 0)
+        XCTAssertEqual(p.bearing, 0)
+        XCTAssertEqual(p.verticalAccuracy, 0)
+        XCTAssertEqual(p.speedAccuracy, 0)
+        XCTAssertEqual(p.bearingAccuracy, 0)
+    }
+
+    func testAFixWithNoPositionIsSkipped() {
+        XCTAssertNil(LocationMapping.payload(fix(hAcc: -1)))
+    }
+
+    func testAFixSaysWhereItCameFrom() {
+        var f = fix()
+        f.simulated = true
+        XCTAssertEqual(LocationMapping.payload(f)?.provider, "simulated")
+        f = fix()
+        f.accessory = true
+        XCTAssertEqual(LocationMapping.payload(f)?.provider, "accessory")
+    }
+
+    func testActivityTransitionsEnterThenLeave() {
+        var t = ActivityTransitions()
+        var seen = t.observe(.init(stationary: true))
+        XCTAssertEqual(seen.map(\.activity), ["still"])
+        XCTAssertEqual(seen.map(\.transition), ["enter"])
+        seen = t.observe(.init(walking: true))
+        XCTAssertEqual(seen.map(\.activity), ["still", "walking"])
+        XCTAssertEqual(seen.map(\.transition), ["exit", "enter"])
+    }
+
+    func testTheSameActivityTwiceIsNoTransition() {
+        var t = ActivityTransitions()
+        _ = t.observe(.init(walking: true))
+        XCTAssertTrue(t.observe(.init(walking: true)).isEmpty)
+    }
+
+    func testUnknownLeavesTheCurrentActivityStanding() {
+        var t = ActivityTransitions()
+        _ = t.observe(.init(running: true))
+        XCTAssertTrue(t.observe(.init()).isEmpty)
+        XCTAssertEqual(t.observe(.init(walking: true)).map(\.activity), ["running", "walking"])
+    }
+
+    func testTheMostSpecificActivityWins() {
+        var t = ActivityTransitions()
+        XCTAssertEqual(t.observe(.init(stationary: true, automotive: true)).last?.activity, "in_vehicle", "a red light")
+        t = ActivityTransitions()
+        XCTAssertEqual(t.observe(.init(walking: true, cycling: true)).last?.activity, "on_bicycle")
+        t = ActivityTransitions()
+        XCTAssertEqual(t.observe(.init(walking: true, running: true)).last?.activity, "running")
+        t = ActivityTransitions()
+        XCTAssertEqual(t.observe(.init(stationary: true, walking: true)).last?.activity, "walking")
+    }
+
+    func testTheWatchHasNoBluetoothAndKeepsLocationOffByDefault() {
+        let phone = Dictionary(uniqueKeysWithValues: SensingCatalog.phone.map { ($0.id, $0) })
+        let watch = Dictionary(uniqueKeysWithValues: SensingCatalog.watch.map { ($0.id, $0) })
+        XCTAssertNotNil(phone[SensingCatalog.bluetooth])
+        XCTAssertNil(watch[SensingCatalog.bluetooth])
+        XCTAssertEqual(phone[SensingCatalog.location]?.defaultOn, true)
+        XCTAssertEqual(watch[SensingCatalog.location]?.defaultOn, false)
+        XCTAssertEqual(watch[SensingCatalog.activity]?.defaultOn, false)
+        XCTAssertEqual(phone[SensingCatalog.location]?.setting.samplingPeriodUs, 30_000_000)
+    }
+
+    func testSoundAndBluetoothAreOffUntilSomeoneTurnsThemOn() {
+        for catalog in [SensingCatalog.phone, SensingCatalog.watch] {
+            XCTAssertEqual(catalog.first { $0.id == SensingCatalog.audioLevel }?.defaultOn, false)
+        }
+        XCTAssertEqual(SensingCatalog.phone.first { $0.id == SensingCatalog.bluetooth }?.defaultOn, false)
+    }
+
+    func testBatteryScreenAndNetworkAreOnEverywhere() {
+        for catalog in [SensingCatalog.phone, SensingCatalog.watch] {
+            for id in [SensingCatalog.battery, SensingCatalog.screen, SensingCatalog.network] {
+                XCTAssertEqual(catalog.first { $0.id == id }?.defaultOn, true, id.value)
+            }
+        }
+    }
+}

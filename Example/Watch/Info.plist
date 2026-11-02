@@ -26,6 +26,10 @@
 	<string>Runs a workout session so sensors keep recording with the screen off. Nothing is read from Health.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Runs a workout session so sensors keep recording with the screen off. Nothing is saved to Health.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>If you turn on Location for the watch, records where you were during a recording.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>If you turn on Sound level, measures how loud it is. No audio is kept, written or sent.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Records your watch's motion sensors for the activity you choose.</string>
 	<key>WKApplication</key>
@@ -33,6 +37,7 @@
 	<key>WKBackgroundModes</key>
 	<array>
 		<string>workout-processing</string>
+		<string>location</string>
 	</array>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.rahulislam.sensing.example</string>
