@@ -91,6 +91,12 @@ func fixtureBatches() -> [Sensorlog_V1_SampleBatch] {
             },
             sample("device.bluetooth_scan", seq: 1) { s in s.tensor = .with { $0.shape = [0, 2] } },
         ]),
+        // What the radio adapters write, from their real mappings.
+        batch("device.cellular", [event("device.cellular", seq: 0, "cellular", CellularEvent.attributes(technology: "CTRadioAccessTechnologyNRNSA", services: 1, restriction: .notRestricted))]),
+        batch("device.wifi", [event("device.wifi", seq: 0, WifiConnectionEvent.connected, WifiConnectionEvent.attributes(ssid: "home", bssid: "aa:bb:cc:dd:ee:ff", security: .personal, hash: IdentifierHash(salt: device)))]),
+        batch("device.network_rtt", [event("device.network_rtt", seq: 0, "probe", NetworkProbeEvent.attributes(ok: true, transport: "wifi", connectMs: 18.4, smoothedMs: 19, radio: "wifi_ax", host: SensingCatalog.probeHost))]),
+        batch("loc.heading", [event("loc.heading", seq: 0, "heading", HeadingEvent.attributes(magnetic: 271.5, trueHeading: 273, accuracy: 10, x: 1, y: -2, z: 3))]),
+        batch("device.peer_distance", [sample("device.peer_distance", seq: 0) { s in s.scalar = .with { $0.value = 1.25 } }]),
         batch("device.session", [event("device.session", seq: 0, "start", ["reason": "engine_start", "platform": "ios", "note": "é=;,|% ok"])]),
         batch("device.clock", [event("device.clock", seq: 0, "clock", ["mono_ns": mono, "wall_ms": wall])]),
         // Whole activity sessions from the real SessionEvents, so the ingest's label projection judges what the app writes.

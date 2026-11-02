@@ -43,9 +43,11 @@ public final class WatchSensing {
         options.hardCeiling = 50_000
         options.heartbeatExtras = { @Sendable in battery.attributes() }
         let deviceId = try DeviceIdentity.load(root: root)
+        let uwbRelay = PeerTokenRelay()
         controller = RecordingController(
             root: root, deviceId: deviceId, catalog: SensingCatalog.watch,
-            adapters: [MotionAdapter(), AltimeterAdapter(), PedometerAdapter(), LocationAdapter(), ActivityAdapter(), BatteryAdapter(), ScreenAdapter(), NetworkAdapter(), AudioLevelAdapter()],
+            adapters: [MotionAdapter(), AltimeterAdapter(), PedometerAdapter(), LocationAdapter(), ActivityAdapter(), BatteryAdapter(), ScreenAdapter(), NetworkAdapter(), AudioLevelAdapter(),
+                       HeadingAdapter(), UwbDistanceAdapter(relay: uwbRelay)],
             device: DeviceDescription(platform: "watchos", model: DeviceModel.machine(), os: "\(device.systemName) \(device.systemVersion)", appVersion: appVersion, sdkVersion: SDK.version,
                                       extras: ["wrist": device.wristLocation == .left ? "left" : "right", "crown": device.crownOrientation == .left ? "left" : "right"]),
             options: options)
@@ -54,6 +56,9 @@ public final class WatchSensing {
             Task { @MainActor in await self?.keepAliveEvent(kind, detail) }
         }
         link.onChange = { [weak self] in self?.refresh() }
+        let link = link
+        uwbRelay.onSend { token in Task { @MainActor in link.sendUwbToken(token) } }
+        link.onUwbToken = { uwbRelay.receive($0) }
         link.activate()
         refreshBattery()
     }

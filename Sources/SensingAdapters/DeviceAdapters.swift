@@ -194,7 +194,21 @@ public final class NetworkAdapter: SensorAdapter, @unchecked Sendable {
         } else {
             transport = "other"  // includes the watch's link through the phone
         }
-        return NetworkEvent.attributes(transport: transport, metered: path.isExpensive, validated: path.status == .satisfied)
+        var attrs = NetworkEvent.attributes(transport: transport, metered: path.isExpensive, validated: path.status == .satisfied)
+        // Beyond Android's three.
+        attrs["constrained"] = path.isConstrained ? "true" : "false"
+        attrs["ipv4"] = path.supportsIPv4 ? "true" : "false"
+        attrs["ipv6"] = path.supportsIPv6 ? "true" : "false"
+        if #available(iOS 26.0, watchOS 26.0, *) {
+            attrs["ultra_constrained"] = path.isUltraConstrained ? "true" : "false"
+            attrs["link_quality"] = switch path.linkQuality {
+            case .minimal: "minimal"
+            case .moderate: "moderate"
+            case .good: "good"
+            default: "unknown"
+            }
+        }
+        return attrs
     }
 
     private final class LastValue: @unchecked Sendable {

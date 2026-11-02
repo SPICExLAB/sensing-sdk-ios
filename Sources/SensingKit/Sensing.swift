@@ -98,11 +98,13 @@ public final class Sensing {
         engine.heartbeatExtras = { @Sendable in battery.attributes() }
         let motion = MotionAdapter()
         self.motion = motion
+        let uwbRelay = PeerTokenRelay()
         let deviceId = try DeviceIdentity.load(root: root)
         controller = RecordingController(
             root: root, deviceId: deviceId, catalog: SensingCatalog.phone,
             adapters: [motion, AltimeterAdapter(), PedometerAdapter(), LocationAdapter(), ActivityAdapter(), BatteryAdapter(), ScreenAdapter(), NetworkAdapter(),
-                       AudioLevelAdapter(), BluetoothAdapter(salt: deviceId)],
+                       AudioLevelAdapter(), BluetoothAdapter(salt: deviceId), CellularAdapter(), WifiConnectionAdapter(salt: deviceId), NetworkLatencyAdapter(),
+                       HeadingAdapter(), UwbDistanceAdapter(relay: uwbRelay)],
             device: DeviceDescription(platform: "ios", model: DeviceModel.machine(), os: "\(device.systemName) \(device.systemVersion)", appVersion: options.appVersion, sdkVersion: SDK.version),
             options: engine)
         link = PhoneLink(transport: WCLinkTransport(), root: root, engine: controller.engine, recordings: controller.recordings)
@@ -118,6 +120,9 @@ public final class Sensing {
             Task { await self.stop(reason: "watch_stop") }
         }
         link.onChange = { [weak self] in self?.refresh() }
+        let link = link
+        uwbRelay.onSend { token in Task { @MainActor in link.sendUwbToken(token) } }
+        link.onUwbToken = { uwbRelay.receive($0) }
         // Now, not at `prepare`: WatchConnectivity can launch this app in the background to hand it a chunk.
         link.activate()
         keepAliveController.onEvent = { [weak self] kind, detail in
@@ -168,7 +173,10 @@ public final class Sensing {
         // The phone never waits for the watch: it's recording already.
         await link.waitUntilActive()
         if recordWatch, link.transport.isCounterpartInstalled {
-            link.publish(recording: PeerRecording(id: spec.id, label: spec.label, startWallMs: summary.startWallMs, maxDurationMs: spec.maxDurationMs, overrides: watchOverrides))
+            // UWB takes both devices, so turning it on here turns it on there.
+            var forWatch = watchOverrides
+            if overrides[SensingCatalog.peerDistance]?.enabled == true { forWatch[SensingCatalog.peerDistance] = SensorOverride(enabled: true) }
+            link.publish(recording: PeerRecording(id: spec.id, label: spec.label, startWallMs: summary.startWallMs, maxDurationMs: spec.maxDurationMs, overrides: forWatch))
             startWatch()
             await link.pairClock()
         }

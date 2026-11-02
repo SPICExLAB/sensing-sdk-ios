@@ -18,6 +18,7 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
     private var decimator = Decimator(periodUs: 30_000_000)
     private var gate = ForwardGate()
     private var available: Bool?
+    private var lastState: [String: String]?
 
     public override init() {}
 
@@ -37,13 +38,15 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
             decimator = Decimator(periodUs: periodUs)
             gate = ForwardGate(startNs: clock.monoNs())  // a cached fix from before this recording isn't part of it
             available = nil
+            lastState = nil
         }
         sink.event("listening", ["interval_ms": String(periodUs / 1000), "provider_enabled": CLLocationManager.locationServicesEnabled() ? "true" : "false"], tsMonoNs: clock.monoNs(), tsWallMs: clock.wallMs())
         // A location manager needs a thread with a run loop.
         DispatchQueue.main.async { [self] in
             let m = CLLocationManager()
             m.delegate = self
-            m.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            // A fast rate is for following movement, which ten-metre fixes can't.
+            m.desiredAccuracy = periodUs < 10_000_000 ? kCLLocationAccuracyBest : kCLLocationAccuracyNearestTenMeters
             m.distanceFilter = kCLDistanceFilterNone
             if Self.hasBackgroundLocationMode {
                 m.allowsBackgroundLocationUpdates = true
@@ -89,6 +92,7 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
                                           course: l.course, courseAccuracy: l.courseAccuracy, simulated: info?.isSimulatedBySoftware == true, accessory: info?.isProducedByAccessory == true)
             guard let payload = LocationMapping.payload(fix) else { continue }
             let wall = Int64(l.timestamp.timeIntervalSince1970 * 1000)
+            let state = LocationStateEvent.attributes(fullAccuracy: manager.accuracyAuthorization == .fullAccuracy, floor: l.floor.map { Int64($0.level) })
             lock.withLock {
                 guard let sink, let clock else { return }
                 let mono = clock.monoNs() - max(clock.wallMs() - wall, 0) * 1_000_000
@@ -97,6 +101,10 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
                 if available != true {
                     available = true
                     sink.event("available", tsMonoNs: mono, tsWallMs: wall)
+                }
+                if state != lastState {
+                    lastState = state
+                    sink.event("state", state, tsMonoNs: mono, tsWallMs: wall)
                 }
                 guard decimator.take(tsNs: mono) else { return }
                 sink.message(.location(payload), tsMonoNs: mono, tsWallMs: wall, accuracy: .high)
@@ -111,6 +119,66 @@ public final class LocationAdapter: NSObject, SensorAdapter, CLLocationManagerDe
             let mono = clock.monoNs()
             gate.note(tsNs: mono)
             sink.event("unavailable", ["reason": String((error as NSError).code)], tsMonoNs: mono, tsWallMs: clock.wallMs())
+        }
+    }
+}
+
+/// `loc.heading`: the compass, as CoreLocation calibrates it, with the raw field behind it.
+public final class HeadingAdapter: NSObject, SensorAdapter, CLLocationManagerDelegate, @unchecked Sendable {
+    public let sensors = [SensingCatalog.heading]
+
+    private let lock = NSLock()
+    private var manager: CLLocationManager?
+    private var sink: SampleSink?
+    private var clock: (any EngineClock)?
+    private var decimator = Decimator(periodUs: 1_000_000)
+    private var gate = ForwardGate()
+
+    public override init() {}
+
+    public func availability(of sensor: SensorID) -> Availability {
+        CLLocationManager.headingAvailable() ? .available : .missingHardware
+    }
+
+    public func start(_ settings: [SensorID: SensorSetting], sinks: [SensorID: SampleSink], clock: any EngineClock) throws {
+        guard let sink = sinks[SensingCatalog.heading] else { return }
+        let periodUs = settings[SensingCatalog.heading]?.samplingPeriodUs ?? 1_000_000
+        lock.withLock {
+            self.sink = sink
+            self.clock = clock
+            decimator = Decimator(periodUs: periodUs)
+            gate = ForwardGate(startNs: clock.monoNs())
+        }
+        // A location manager needs a thread with a run loop.
+        DispatchQueue.main.async { [self] in
+            let m = CLLocationManager()
+            m.delegate = self
+            m.headingFilter = kCLHeadingFilterNone
+            lock.withLock { manager = m }
+            m.startUpdatingHeading()
+        }
+    }
+
+    public func stop() {
+        let m = lock.withLock { () -> CLLocationManager? in
+            defer {
+                manager = nil
+                sink = nil
+                clock = nil
+            }
+            return manager
+        }
+        DispatchQueue.main.async { m?.stopUpdatingHeading() }
+    }
+
+    public func locationManager(_ manager: CLLocationManager, didUpdateHeading heading: CLHeading) {
+        let wall = Int64(heading.timestamp.timeIntervalSince1970 * 1000)
+        lock.withLock {
+            guard let sink, let clock else { return }
+            let mono = clock.monoNs() - max(clock.wallMs() - wall, 0) * 1_000_000
+            guard gate.admit(tsNs: mono), decimator.take(tsNs: mono) else { return }
+            sink.event("heading", HeadingEvent.attributes(magnetic: heading.magneticHeading, trueHeading: heading.trueHeading, accuracy: heading.headingAccuracy, x: heading.x, y: heading.y, z: heading.z),
+                       tsMonoNs: mono, tsWallMs: wall)
         }
     }
 }

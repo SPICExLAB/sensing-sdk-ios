@@ -327,10 +327,42 @@ final class LinkFlowTests: XCTestCase {
         XCTAssertEqual(r.phone.recordings.find(id: id)?.peerEngineSessions?.count, 1, "an export finds the watch's chunks through these")
     }
 
+    func testUwbTokensCrossTheLinkBothWays() async throws {
+        let r = try await rig()
+        let phoneGot = TokenBox()
+        let watchGot = TokenBox()
+        r.phoneLink.onUwbToken = { phoneGot.value = $0 }
+        r.watchLink.onUwbToken = { watchGot.value = $0 }
+        r.phoneLink.sendUwbToken(Data([1, 2]))
+        r.watchLink.sendUwbToken(Data([3, 4]))
+        await until("the watch's copy") { watchGot.value == Data([1, 2]) }
+        await until("the phone's copy") { phoneGot.value == Data([3, 4]) }
+    }
+
+    func testAUwbTokenIsDroppedWithoutALinkRatherThanQueued() async throws {
+        let r = try await rig()
+        let watchGot = TokenBox()
+        r.watchLink.onUwbToken = { watchGot.value = $0 }
+        r.transports.phone.setUp(false)
+        r.phoneLink.sendUwbToken(Data([1]))  // a token dies with its session, so a late one would be useless
+        r.transports.phone.setUp(true)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertNil(watchGot.value)
+    }
+
     func testStatusReachesThePhone() async throws {
         let r = try await rig()
         r.phoneLink.publish(recording: r.recording())
         await until("the first status") { r.phoneLink.peer.status?.recordingId == "aaaaaaaa-1111-4111-8111-111111111111" }
         XCTAssertNotNil(r.phoneLink.peer.status?.engineSession)
+    }
+}
+
+private final class TokenBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Data?
+    var value: Data? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }
