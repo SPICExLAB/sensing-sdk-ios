@@ -1,1 +1,1 @@
-inrtl-lab cloud/dashboard/internal/api/taxonomy.json @297de02, taxonomy version 2
+inrtl-lab cloud/dashboard/internal/api/taxonomy.json @8e46819, taxonomy version 3
